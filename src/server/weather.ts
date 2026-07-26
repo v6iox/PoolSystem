@@ -225,10 +225,13 @@ export async function heatAdvisories(kind: "pool" | "spa", setPoint?: number): P
   }
 
   // Very windy right now → spa heat loss is dramatic with the cover off.
-  if (kind === "spa" && forecast.current.windMph >= 20) {
+  // Prefer the on-site Tempest reading over the modeled wind when available.
+  const { getTempestCurrent } = await import("@/server/tempest");
+  const windMph = getTempestCurrent()?.windMph ?? forecast.current.windMph;
+  if (kind === "spa" && windMph >= 20) {
     advisories.push({
       severity: "info",
-      message: `It's blowing ${Math.round(forecast.current.windMph)} mph — expect the spa to lose heat fast.`,
+      message: `It's blowing ${Math.round(windMph)} mph at the pool — expect the spa to lose heat fast.`,
     });
   }
 

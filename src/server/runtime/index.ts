@@ -61,12 +61,14 @@ export class Runtime {
     this.sample();
 
     // Lazy imports break the runtime → worker → control → runtime cycle.
-    const [{ startAutomationWorker }, { startAlertEngine }] = await Promise.all([
+    const [{ startAutomationWorker }, { startAlertEngine }, { startTempest }] = await Promise.all([
       import("@/server/automations/worker"),
       import("@/server/alerts/engine"),
+      import("@/server/tempest"),
     ]);
     startAutomationWorker(this);
     startAlertEngine(this);
+    startTempest();
     console.log(`[moonpool] runtime started (${this.mock ? "MOCK_MODE simulator" : `njsPC @ ${process.env.NJSPC_URL ?? "http://localhost:4200"}`})`);
   }
 

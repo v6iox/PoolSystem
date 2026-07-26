@@ -14,4 +14,13 @@ export interface WeatherData {
   high: number;
   low: number;
   fetchedAt: number;
+  /** Where the current conditions came from. */
+  source?: "open-meteo" | "tempest";
+  /** Extras available when a Tempest station is feeding us. */
+  humidity?: number;
+  uv?: number;
+  solarWm2?: number;
+  gustMph?: number;
+  /** Measured rainfall today, inches. */
+  rainTodayIn?: number;
 }

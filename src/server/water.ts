@@ -1,4 +1,5 @@
 import { getForecast, rainWindows } from "@/server/weather";
+import { getMeasuredRainByDay } from "@/server/tempest";
 import { getAppSettings, getSetting, setSetting } from "@/server/settings";
 
 /**
@@ -75,11 +76,13 @@ export async function estimateWaterLevel(): Promise<WaterEstimate> {
   const refillStr = new Date(refillAt).toLocaleDateString("sv-SE");
   // Only count full days from the refill day through today, capped at what we have.
   const counted = forecast.daily.filter((d) => d.day >= refillStr && d.day <= todayStr);
+  // Prefer rainfall the owner's Tempest actually measured over modeled precip.
+  const measuredRain = getMeasuredRainByDay();
   let lossMm = 0;
   let rainMm = 0;
   for (const d of counted) {
     lossMm += d.et0Mm * OPEN_WATER_FACTOR;
-    rainMm += d.precipMm;
+    rainMm += measuredRain.get(d.day) ?? d.precipMm;
   }
   const lossInches = lossMm / 25.4;
   const rainInches = rainMm / 25.4;

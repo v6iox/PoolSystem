@@ -181,6 +181,29 @@ You get `https://moonpool.<tailnet>.ts.net` reachable from the public internet �
 (Plain `tailscale serve` restricts it to devices in your tailnet instead, if you ever
 want the tighter posture.)
 
+## Tempest weather station
+
+Have a WeatherFlow Tempest? Moonpool uses it, local-first:
+
+- The hub broadcasts observations on **UDP :50222** on your LAN — Moonpool just
+  listens (`TEMPEST_UDP=true`, the default). No API key, no cloud, nothing leaves
+  the house.
+- **Measured rainfall** replaces Open-Meteo's modeled precip in the water-level
+  estimator — "did it actually rain into the pool" becomes ground truth.
+- **Real wind/gusts, humidity, UV** feed the weather widget and the heat
+  advisories ("It's blowing 24 mph at the pool — the spa will lose heat fast").
+- **Lightning alerts**: a detected strike within ~15 mi sends a push —
+  *"Time to get out of the pool"* — with a 30-minute cooldown.
+
+Docker note: LAN UDP broadcasts often don't cross Docker's bridge network. The
+compose file maps `50222/udp`, but if observations never arrive you have two
+easy fixes: set the REST fallback (`TEMPEST_TOKEN` + `TEMPEST_STATION_ID`, token
+from tempestwx.com → Settings → Data Authorizations — polls every 5 min), or run
+the `web` service with `network_mode: host` (then set
+`NJSPC_URL=http://localhost:4200`). Forecasts (rain windows, ET₀ for
+evaporation) still come from Open-Meteo either way — the Tempest supplies
+ground truth for *now*, Open-Meteo supplies *later*.
+
 ## The Pool Copilot
 
 A chat tab where anyone types things like:

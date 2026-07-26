@@ -30,6 +30,10 @@ services:
       - njspc
     ports:
       - "3000:3000"
+      # Tempest hub UDP broadcasts. If your Docker network can't see LAN
+      # broadcasts (common with bridge networking), use the TEMPEST_TOKEN
+      # REST fallback or switch this service to network_mode: host.
+      - "50222:50222/udp"
     volumes:
       - moonpool-data:/data
     environment:
@@ -42,6 +46,9 @@ services:
       - COPILOT_API_KEY=${COPILOT_API_KEY:-}
       - POOL_LATITUDE=${POOL_LATITUDE:-39.74}
       - POOL_LONGITUDE=${POOL_LONGITUDE:--104.99}
+      - TEMPEST_UDP=${TEMPEST_UDP:-true}
+      - TEMPEST_TOKEN=${TEMPEST_TOKEN:-}
+      - TEMPEST_STATION_ID=${TEMPEST_STATION_ID:-}
       - TZ=${TZ:-America/Denver}
 
   # Local LLM for the Pool Copilot. First run: docker compose exec ollama ollama pull qwen3:1.7b

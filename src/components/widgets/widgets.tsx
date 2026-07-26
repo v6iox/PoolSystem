@@ -236,20 +236,30 @@ export function WeatherWidget(): React.JSX.Element {
   const w = data?.weather;
   const desc = w ? (WEATHER_DESC.find(([max]) => w.code <= max)?.[1] ?? "—") : "";
   const useC = snapshot.units === "C";
+  const fromTempest = w?.source === "tempest";
   return (
-    <WidgetFrame title="Weather">
+    <WidgetFrame title={fromTempest ? "Weather · Tempest" : "Weather"}>
       {w ? (
-        <div className="flex h-full items-center justify-between gap-2">
-          <div>
-            <p className="temp-display text-3xl text-ink">
-              {Math.round(useC ? w.tempC : w.tempF)}°
-            </p>
-            <p className="text-xs text-ink-dim">{desc}</p>
-            <p className="mt-1 text-[11px] text-ink-faint">
-              H {Math.round(useC ? ((w.high - 32) * 5) / 9 : w.high)}° · L {Math.round(useC ? ((w.low - 32) * 5) / 9 : w.low)}° · wind {Math.round(w.windMph)} mph
-            </p>
+        <div className="flex h-full flex-col justify-between gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="temp-display text-3xl text-ink">
+                {Math.round(useC ? w.tempC : w.tempF)}°
+              </p>
+              <p className="text-xs text-ink-dim">
+                {desc}
+                {fromTempest && w.humidity !== undefined ? ` · ${Math.round(w.humidity)}% rh` : ""}
+              </p>
+            </div>
+            {weatherIcon(w.code, w.isDay)}
           </div>
-          {weatherIcon(w.code, w.isDay)}
+          <p className="text-[11px] text-ink-faint">
+            H {Math.round(useC ? ((w.high - 32) * 5) / 9 : w.high)}° · L {Math.round(useC ? ((w.low - 32) * 5) / 9 : w.low)}° · wind{" "}
+            {Math.round(w.windMph)}
+            {fromTempest && w.gustMph !== undefined ? `–${Math.round(w.gustMph)}` : ""} mph
+            {fromTempest && w.uv !== undefined ? ` · UV ${Math.round(w.uv)}` : ""}
+            {fromTempest && w.rainTodayIn !== undefined && w.rainTodayIn > 0 ? ` · ${w.rainTodayIn}" rain today` : ""}
+          </p>
         </div>
       ) : (
         <p className="text-sm text-ink-faint">Weather unavailable (offline?)</p>
