@@ -1,6 +1,7 @@
 import { getDb, now } from "@/server/db";
 import { getAppSettings } from "@/server/settings";
 import { sendAlert, type AlertKind } from "@/server/push";
+import { estimateWaterLevel } from "@/server/water";
 import type { Runtime } from "@/server/runtime";
 import type { PoolStateSnapshot } from "@/types/pool";
 
@@ -123,12 +124,25 @@ function evaluate(snap: PoolStateSnapshot): void {
   );
 }
 
+/** Water balance is weather-driven, not snapshot-driven — check every 6h. */
+let lastWaterCheck = 0;
+
+async function checkWaterLevel(): Promise<void> {
+  const estimate = await estimateWaterLevel();
+  if (!estimate.available) return;
+  fire("waterLow", "water:low", estimate.low, "Pool water is likely low", estimate.message);
+}
+
 export function startAlertEngine(runtime: Runtime): void {
   runtime.onSnapshot((snap) => {
     try {
       evaluate(snap);
     } catch (err) {
       console.error("[moonpool] alert engine error", err);
+    }
+    if (now() - lastWaterCheck > 6 * 3600_000) {
+      lastWaterCheck = now();
+      void checkWaterLevel().catch(() => undefined);
     }
   });
 }

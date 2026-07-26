@@ -7,6 +7,8 @@ import { getDb } from "@/server/db";
 
 export interface AppSettings {
   poolVolumeGallons: number;
+  /** Water surface area — used by the water-level (evaporation) estimator. */
+  poolSurfaceAreaSqFt: number;
   costPerKwh: number;
   latitude: number;
   longitude: number;
@@ -27,6 +29,7 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   poolVolumeGallons: 15000,
+  poolSurfaceAreaSqFt: 450,
   costPerKwh: 0.14,
   latitude: Number(process.env.POOL_LATITUDE ?? 39.74),
   longitude: Number(process.env.POOL_LONGITUDE ?? -104.99),

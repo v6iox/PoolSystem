@@ -15,15 +15,77 @@ export interface HourlyForecast {
   windMph: number;
 }
 
+export interface DailyWater {
+  /** YYYY-MM-DD local */
+  day: string;
+  /** Reference evapotranspiration, mm (open water evaporates ≈ 1.1×). */
+  et0Mm: number;
+  /** Actual/forecast precipitation, mm. */
+  precipMm: number;
+}
+
 export interface Forecast {
   current: WeatherData;
   hourly: HourlyForecast[]; // next ~48h
+  /** Past 7 days (actuals) + next 3 (forecast) — powers the water-balance estimate. */
+  daily: DailyWater[];
   fetchedAt: number;
 }
 
 let cache: Forecast | null = null;
 
+/**
+ * MOCK_MODE forecast: plausible synthetic weather so every weather-driven
+ * feature (widget, heat advisories, water balance) is demoable offline.
+ * Includes a rain window tomorrow 3–4 PM on purpose.
+ */
+function mockForecast(): Forecast {
+  const nowMs = Date.now();
+  const hourTemp = (at: number): number => {
+    const h = new Date(at).getHours();
+    return 70 + 14 * Math.sin(((h - 10) / 24) * Math.PI * 2);
+  };
+  const tomorrow3pm = new Date();
+  tomorrow3pm.setDate(tomorrow3pm.getDate() + 1);
+  tomorrow3pm.setHours(15, 0, 0, 0);
+  const hourly: HourlyForecast[] = [];
+  for (let i = 0; i < 48; i++) {
+    const at = nowMs + i * 3600_000;
+    const inRainWindow = at >= tomorrow3pm.getTime() && at < tomorrow3pm.getTime() + 3600_000;
+    hourly.push({ at, tempF: Math.round(hourTemp(at)), precipProbability: inRainWindow ? 80 : 10, windMph: 6 });
+  }
+  const daily: DailyWater[] = [];
+  for (let offset = -7; offset <= 2; offset++) {
+    const d = new Date(nowMs + offset * 86400_000);
+    daily.push({
+      day: d.toLocaleDateString("sv-SE"),
+      et0Mm: 5.4,
+      precipMm: offset === 1 ? 6 : 0,
+    });
+  }
+  const tempF = Math.round(hourTemp(nowMs));
+  return {
+    current: {
+      tempF,
+      tempC: Math.round((((tempF - 32) * 5) / 9) * 10) / 10,
+      code: new Date().getHours() < 18 ? 1 : 0,
+      windMph: 6,
+      isDay: new Date().getHours() >= 6 && new Date().getHours() < 20,
+      high: 84,
+      low: 58,
+      fetchedAt: nowMs,
+    },
+    hourly,
+    daily,
+    fetchedAt: nowMs,
+  };
+}
+
 export async function getForecast(): Promise<Forecast | null> {
+  if (process.env.MOCK_MODE === "true") {
+    if (!cache || Date.now() - cache.fetchedAt > 10 * 60_000) cache = mockForecast();
+    return cache;
+  }
   if (cache && Date.now() - cache.fetchedAt < 10 * 60_000) return cache;
   const { latitude, longitude } = getAppSettings();
   try {
@@ -31,14 +93,20 @@ export async function getForecast(): Promise<Forecast | null> {
       `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}` +
       `&current=temperature_2m,weather_code,wind_speed_10m,is_day` +
       `&hourly=temperature_2m,precipitation_probability,wind_speed_10m` +
-      `&daily=temperature_2m_max,temperature_2m_min` +
-      `&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=3`;
+      `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,et0_fao_evapotranspiration` +
+      `&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=3&past_days=7`;
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) throw new Error(`open-meteo ${res.status}`);
     const json = (await res.json()) as {
       current?: { temperature_2m?: number; weather_code?: number; wind_speed_10m?: number; is_day?: number };
       hourly?: { time?: string[]; temperature_2m?: number[]; precipitation_probability?: number[]; wind_speed_10m?: number[] };
-      daily?: { temperature_2m_max?: number[]; temperature_2m_min?: number[] };
+      daily?: {
+        time?: string[];
+        temperature_2m_max?: number[];
+        temperature_2m_min?: number[];
+        precipitation_sum?: number[];
+        et0_fao_evapotranspiration?: number[];
+      };
     };
     const tempF = json.current?.temperature_2m ?? 0;
     const times = json.hourly?.time ?? [];
@@ -51,6 +119,15 @@ export async function getForecast(): Promise<Forecast | null> {
         windMph: json.hourly?.wind_speed_10m?.[i] ?? 0,
       }))
       .filter((h) => h.at >= nowMs - 3600_000 && h.at <= nowMs + 48 * 3600_000);
+    const dayList = json.daily?.time ?? [];
+    // past_days=7 shifts indexes: find "today" for the current high/low.
+    const todayStr = new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD
+    const todayIdx = Math.max(0, dayList.indexOf(todayStr));
+    const daily: DailyWater[] = dayList.map((day, i) => ({
+      day,
+      et0Mm: json.daily?.et0_fao_evapotranspiration?.[i] ?? 0,
+      precipMm: json.daily?.precipitation_sum?.[i] ?? 0,
+    }));
     cache = {
       current: {
         tempF,
@@ -58,11 +135,12 @@ export async function getForecast(): Promise<Forecast | null> {
         code: json.current?.weather_code ?? 0,
         windMph: json.current?.wind_speed_10m ?? 0,
         isDay: (json.current?.is_day ?? 1) === 1,
-        high: json.daily?.temperature_2m_max?.[0] ?? tempF,
-        low: json.daily?.temperature_2m_min?.[0] ?? tempF,
+        high: json.daily?.temperature_2m_max?.[todayIdx] ?? tempF,
+        low: json.daily?.temperature_2m_min?.[todayIdx] ?? tempF,
         fetchedAt: Date.now(),
       },
       hourly,
+      daily,
       fetchedAt: Date.now(),
     };
     return cache;
@@ -90,7 +168,7 @@ function dayWord(at: number): string {
 }
 
 /** Find contiguous rain windows (probability ≥ threshold) in the next 36h. */
-function rainWindows(hourly: HourlyForecast[], threshold = 55): Array<{ from: number; to: number; peak: number }> {
+export function rainWindows(hourly: HourlyForecast[], threshold = 55): Array<{ from: number; to: number; peak: number }> {
   const windows: Array<{ from: number; to: number; peak: number }> = [];
   let open: { from: number; to: number; peak: number } | null = null;
   for (const h of hourly.filter((x) => x.at <= Date.now() + 36 * 3600_000)) {

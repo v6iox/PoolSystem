@@ -28,6 +28,7 @@ import {
   SchedulesWidget,
   WeatherWidget,
 } from "./widgets";
+import { WaterWidget } from "./water-widget";
 
 export interface WidgetDef {
   id: string;
@@ -43,6 +44,7 @@ const WIDGETS: WidgetDef[] = [
   { id: "pump", title: "Pump", minRole: "family", component: PumpWidget, defaultWide: false },
   { id: "chlorinator", title: "Chlorinator & salt", minRole: "family", component: ChlorinatorWidget, defaultWide: false },
   { id: "weather", title: "Weather", minRole: "guest", component: WeatherWidget, defaultWide: false },
+  { id: "water", title: "Water level", minRole: "family", component: WaterWidget, defaultWide: false },
   { id: "schedules", title: "Coming up", minRole: "family", component: SchedulesWidget, defaultWide: false },
   { id: "chemistry", title: "Chemistry", minRole: "family", component: ChemistryWidget, defaultWide: false },
   { id: "health", title: "System health", minRole: "guest", component: HealthWidget, defaultWide: false },

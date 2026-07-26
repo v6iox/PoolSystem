@@ -14,7 +14,8 @@ export type AlertKind =
   | "saltLow"
   | "chemistryOutOfRange"
   | "spaAtTemp"
-  | "njspcOffline";
+  | "njspcOffline"
+  | "waterLow";
 
 export const ALERT_LABELS: Record<AlertKind, string> = {
   equipmentFault: "Equipment fault",
@@ -23,6 +24,7 @@ export const ALERT_LABELS: Record<AlertKind, string> = {
   chemistryOutOfRange: "Chemistry out of range",
   spaAtTemp: "Spa reached temperature",
   njspcOffline: "Pool controller offline",
+  waterLow: "Water level low (estimated)",
 };
 
 interface VapidKeys {
