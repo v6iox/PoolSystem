@@ -15,7 +15,7 @@ import { AdapterError, type PoolAdapter } from "./types";
 
 /**
  * Full pool simulator for MOCK_MODE. Models a realistic EasyTouch system:
- * pool + spa, 8 circuits, IntelliFlo VS pump, IntelliChlor IC40, IntelliBrite
+ * pool + spa, 10 circuits, IntelliFlo VS pump, IntelliChlor IC40, IntelliBrite
  * lights (+ a light group), schedules, and temperatures that drift toward
  * ambient and rise while heating. Runs entirely in-process — zero hardware.
  */
@@ -81,19 +81,23 @@ export class MockAdapter implements PoolAdapter {
   private scheduleSeq = 100;
 
   private bodies: SimBody[] = [
-    { id: 1, name: "Pool", kind: "pool", circuitId: 6, temp: 78.4, setPoint: 82, heatMode: "off", heaterFiring: false },
+    { id: 1, name: "Pool", kind: "pool", circuitId: 6, temp: 78.4, setPoint: 90, heatMode: "off", heaterFiring: false },
     { id: 2, name: "Spa", kind: "spa", circuitId: 1, temp: 84.1, setPoint: 102, heatMode: "heater", heaterFiring: false },
   ];
 
+  // Circuit roster mirrors a real EasyTouch install (spa, cleaner, spillway,
+  // waterfall, jets, air blower, lights) so the mock demos feel true to life.
   private circuits: SimCircuit[] = [
     { id: 1, name: "Spa", type: "spa", isOn: false, isLight: false, lightTheme: null, showInFeatures: true },
     { id: 2, name: "Waterfall", type: "generic", isOn: false, isLight: false, lightTheme: null, showInFeatures: true },
-    { id: 3, name: "Pool Light", type: "intellibrite", isOn: false, isLight: true, lightTheme: 2, showInFeatures: true },
+    { id: 3, name: "Pool Lights", type: "intellibrite", isOn: false, isLight: true, lightTheme: 2, showInFeatures: true },
     { id: 4, name: "Spa Light", type: "intellibrite", isOn: false, isLight: true, lightTheme: 2, showInFeatures: true },
     { id: 5, name: "Cleaner", type: "mastercleaner", isOn: false, isLight: false, lightTheme: null, showInFeatures: true },
     { id: 6, name: "Pool", type: "pool", isOn: true, isLight: false, lightTheme: null, showInFeatures: true },
-    { id: 7, name: "Deck Jets", type: "generic", isOn: false, isLight: false, lightTheme: null, showInFeatures: true },
+    { id: 7, name: "Jets", type: "generic", isOn: false, isLight: false, lightTheme: null, showInFeatures: true },
     { id: 8, name: "Landscape Lights", type: "light", isOn: false, isLight: true, lightTheme: null, showInFeatures: true },
+    { id: 9, name: "Spillway", type: "generic", isOn: false, isLight: false, lightTheme: null, showInFeatures: true },
+    { id: 10, name: "Air Blower", type: "generic", isOn: false, isLight: false, lightTheme: null, showInFeatures: true },
   ];
 
   private schedules: SimSchedule[] = [
