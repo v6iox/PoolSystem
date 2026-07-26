@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { Flame, Snowflake, Sun, Thermometer, Wind } from "lucide-react";
 import { usePool, patchSetpoint } from "@/lib/client/pool-state";
 import { TempDial } from "@/components/pool/temp-dial";
+import { useAdvisoryGate } from "@/components/pool/advisory-gate";
 import { WidgetGrid } from "@/components/widgets/widget-grid";
 import { Panel, Skeleton } from "@/components/ui/panel";
 import { roleAtLeast } from "@/types/auth";
@@ -12,6 +13,7 @@ import { cn } from "@/lib/utils";
 function Hero(): React.JSX.Element {
   const { snapshot, hasLoaded, backendConnected, user, sendAction } = usePool();
   const canControl = roleAtLeast(user.role, "family");
+  const { gate, dialog } = useAdvisoryGate();
 
   if (!hasLoaded) {
     return (
@@ -97,11 +99,29 @@ function Hero(): React.JSX.Element {
                   disabled={!backendConnected || !canControl}
                   onSetPoint={
                     canControl
-                      ? (value) =>
-                          void sendAction(
-                            { type: "setHeat", bodyId: body.id, setPoint: value },
-                            patchSetpoint(body.id, value)
-                          )
+                      ? (value) => {
+                          const run = (): void =>
+                            void sendAction(
+                              { type: "setHeat", bodyId: body.id, setPoint: value },
+                              patchSetpoint(body.id, value)
+                            );
+                          // Weather-aware confirmation on meaningful raises
+                          // while heat is actually on; small nudges just go.
+                          if (body.heatMode !== "off" && value >= body.setPoint + 3) {
+                            void gate(
+                              {
+                                bodyId: body.id,
+                                bodyName: body.name,
+                                setPoint: value,
+                                intent: `Raise the ${body.name.toLowerCase()} setpoint to ${value}°${snapshot.units}`,
+                                confirmLabel: `Heat to ${value}°`,
+                              },
+                              run
+                            );
+                          } else {
+                            run();
+                          }
+                        }
                       : undefined
                   }
                 />
@@ -118,6 +138,7 @@ function Hero(): React.JSX.Element {
           </Panel>
         )}
       </div>
+      {dialog}
     </section>
   );
 }

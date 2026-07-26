@@ -1,5 +1,5 @@
 import { getAppSettings } from "@/server/settings";
-import type { WeatherData } from "@/types/weather";
+import type { Advisory, WeatherData } from "@/types/weather";
 
 /**
  * Server-side Open-Meteo client (keyless) with caching, plus the advisory
@@ -71,10 +71,7 @@ export async function getForecast(): Promise<Forecast | null> {
   }
 }
 
-export interface Advisory {
-  severity: "info" | "caution";
-  message: string;
-}
+export type { Advisory } from "@/types/weather";
 
 function formatHour(at: number): string {
   const d = new Date(at);
