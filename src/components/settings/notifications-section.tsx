@@ -12,7 +12,9 @@ import {
   Snowflake,
   Thermometer,
   TriangleAlert,
+  Waves,
   WifiOff,
+  Zap,
 } from "lucide-react";
 import { apiGet, apiSend } from "@/lib/client/api";
 import { getPushStatus, subscribeToPush, unsubscribeFromPush, type PushStatus } from "@/lib/client/push";
@@ -34,7 +36,9 @@ type AlertToggleKind =
   | "saltLow"
   | "chemistryOutOfRange"
   | "spaAtTemp"
-  | "njspcOffline";
+  | "njspcOffline"
+  | "waterLow"
+  | "lightning";
 
 const ALERT_TOGGLES: Array<{ kind: AlertToggleKind; label: string; hint: string; icon: React.ReactNode }> = [
   { kind: "equipmentFault", label: "Equipment fault", hint: "Pump, chlorinator or panel errors", icon: <TriangleAlert size={17} /> },
@@ -43,6 +47,8 @@ const ALERT_TOGGLES: Array<{ kind: AlertToggleKind; label: string; hint: string;
   { kind: "chemistryOutOfRange", label: "Chemistry out of range", hint: "pH / sanitizer outside ideal bands", icon: <FlaskConical size={17} /> },
   { kind: "spaAtTemp", label: "Spa at temperature", hint: "Soak's ready — spa reached its setpoint", icon: <Thermometer size={17} /> },
   { kind: "njspcOffline", label: "Controller offline", hint: "Moonpool lost the pool controller", icon: <WifiOff size={17} /> },
+  { kind: "waterLow", label: "Water level low", hint: "Evaporation estimate says it's time to top off", icon: <Waves size={17} /> },
+  { kind: "lightning", label: "Lightning nearby", hint: "Tempest strike detection — out of the pool", icon: <Zap size={17} /> },
 ];
 
 interface PrefsResponse {

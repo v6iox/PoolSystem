@@ -95,6 +95,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
       const next = { ...prev, ...patch };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       setResolvedMode(apply(next, true));
+      const path = window.location.pathname;
+      if (path.startsWith("/login") || path.startsWith("/setup") || path.startsWith("/offline")) return next;
       // Persist per-user on the server too (fire and forget).
       void fetch("/api/settings/prefs", {
         method: "PUT",
@@ -107,6 +109,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
 
   // Adopt server-side prefs once (e.g. new browser, existing account).
   useEffect(() => {
+    // Pre-auth pages have no session — skip the fetch instead of logging a 401.
+    const path = window.location.pathname;
+    if (path.startsWith("/login") || path.startsWith("/setup") || path.startsWith("/offline")) return;
     void fetch("/api/settings/prefs")
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { prefs?: { theme?: Partial<ThemeSettings> } } | null) => {

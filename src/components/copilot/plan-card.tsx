@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronRight, Info, Loader2, TriangleAlert, X } from "lucide-react";
+import { Check, ChevronRight, CloudRain, Info, Loader2, TriangleAlert, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { CopilotMessage } from "./types";
@@ -58,6 +58,20 @@ export function PlanCard({
           </li>
         ))}
       </ul>
+
+      {plan.advisories && plan.advisories.length > 0 && state === "pending" && (
+        <ul className="mt-2.5 space-y-1.5">
+          {plan.advisories.map((advisory, i) => (
+            <li
+              key={i}
+              className="flex items-start gap-2 rounded-lg border border-warn/25 bg-warn/10 px-2.5 py-2 text-xs text-warn"
+            >
+              <CloudRain size={13} className="mt-0.5 shrink-0" />
+              {advisory}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {plan.note && state === "pending" && (
         <p className="mt-2 flex items-start gap-1.5 text-xs text-warn">

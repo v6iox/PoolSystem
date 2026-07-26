@@ -5,6 +5,8 @@ export type PlanState = "pending" | "confirmed" | "cancelled" | "executed" | "er
 export interface CopilotPlan {
   summary: string[];
   note?: string;
+  /** Weather-aware cautions ("rain tomorrow 3–4 PM") shown before confirming. */
+  advisories?: string[];
   results?: string[];
 }
 

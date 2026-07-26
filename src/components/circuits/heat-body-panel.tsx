@@ -8,6 +8,7 @@ import { roleAtLeast } from "@/types/auth";
 import { Panel } from "@/components/ui/panel";
 import { Switch } from "@/components/ui/switch";
 import { TempDial } from "@/components/pool/temp-dial";
+import { useAdvisoryGate } from "@/components/pool/advisory-gate";
 import { HeatModePicker } from "./heat-mode-picker";
 import { patchCircuitWithBody } from "./optimistic";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ export function HeatBodyPanel({ body, index }: { body: BodyState; index: number 
   const reduced = useReducedMotion();
   const canControl = roleAtLeast(user.role, "family");
   const disabled = !backendConnected || !canControl;
+  const { gate, dialog } = useAdvisoryGate();
 
   const heating = body.heatStatus !== "off";
   const solarActive = body.heatStatus === "solar";
@@ -82,11 +84,28 @@ export function HeatBodyPanel({ body, index }: { body: BodyState; index: number 
           disabled={disabled}
           onSetPoint={
             canControl
-              ? (value) =>
-                  void sendAction(
-                    { type: "setHeat", bodyId: body.id, setPoint: value },
-                    patchSetpoint(body.id, value)
-                  )
+              ? (value) => {
+                  const run = (): void =>
+                    void sendAction(
+                      { type: "setHeat", bodyId: body.id, setPoint: value },
+                      patchSetpoint(body.id, value)
+                    );
+                  // Weather-aware confirmation on meaningful raises while heat is on.
+                  if (body.heatMode !== "off" && value >= body.setPoint + 3) {
+                    void gate(
+                      {
+                        bodyId: body.id,
+                        bodyName: body.name,
+                        setPoint: value,
+                        intent: `Raise the ${body.name.toLowerCase()} setpoint to ${value}°${snapshot.units}`,
+                        confirmLabel: `Heat to ${value}°`,
+                      },
+                      run
+                    );
+                  } else {
+                    run();
+                  }
+                }
               : undefined
           }
         />
@@ -129,10 +148,28 @@ export function HeatBodyPanel({ body, index }: { body: BodyState; index: number 
           modes={body.supportedHeatModes}
           value={body.heatMode}
           disabled={disabled}
-          onChange={(mode) =>
-            void sendAction({ type: "setHeat", bodyId: body.id, mode }, patchHeatMode(body.id, mode))
-          }
+          onChange={(mode) => {
+            const run = (): void =>
+              void sendAction({ type: "setHeat", bodyId: body.id, mode }, patchHeatMode(body.id, mode));
+            // Turning heat ON gets a weather-aware confirmation ("rain is
+            // forecast tomorrow 3–4 PM…"); turning it off never prompts.
+            if (body.heatMode === "off" && mode !== "off") {
+              void gate(
+                {
+                  bodyId: body.id,
+                  bodyName: body.name,
+                  setPoint: body.setPoint,
+                  intent: `Turn on ${mode === "heater" ? "the heater" : mode === "solar" ? "solar heat" : "solar-preferred heat"} for the ${body.name.toLowerCase()} (set ${body.setPoint}°${snapshot.units})`,
+                  confirmLabel: "Heat anyway",
+                },
+                run
+              );
+            } else {
+              run();
+            }
+          }}
         />
+        {dialog}
       </Panel>
     </motion.div>
   );

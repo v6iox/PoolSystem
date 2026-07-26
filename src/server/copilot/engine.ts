@@ -36,6 +36,8 @@ export type PlanState = "pending" | "confirmed" | "cancelled" | "executed" | "er
 export interface PlanDto {
   summary: string[];
   note?: string;
+  /** Weather-aware cautions shown on the confirm card ("rain tomorrow 3–4 PM"). */
+  advisories?: string[];
   results?: string[];
 }
 
@@ -85,7 +87,12 @@ function rowToDto(row: MessageRow): CopilotMessageDto {
   if (row.plan) {
     try {
       const stored = JSON.parse(row.plan) as StoredPlan;
-      plan = { summary: stored.summary, ...(stored.note ? { note: stored.note } : {}), ...(stored.results ? { results: stored.results } : {}) };
+      plan = {
+        summary: stored.summary,
+        ...(stored.note ? { note: stored.note } : {}),
+        ...(stored.advisories && stored.advisories.length > 0 ? { advisories: stored.advisories } : {}),
+        ...(stored.results ? { results: stored.results } : {}),
+      };
     } catch {
       plan = null;
     }
@@ -346,7 +353,13 @@ function insertMessage(
     threadId,
     role,
     content,
-    plan: plan ? { summary: plan.summary, ...(plan.note ? { note: plan.note } : {}) } : null,
+    plan: plan
+      ? {
+          summary: plan.summary,
+          ...(plan.note ? { note: plan.note } : {}),
+          ...(plan.advisories && plan.advisories.length > 0 ? { advisories: plan.advisories } : {}),
+        }
+      : null,
     planState: planState ?? null,
     createdAt: at,
   };
@@ -437,7 +450,32 @@ export async function processMessage(
 
   // State-changing → persist a pending plan and ask for confirmation.
   const summary = writes.map((c) => describeToolCall(c, ctx));
-  const plan: StoredPlan = { calls: writes, summary, ...(note ? { note } : {}) };
+
+  // Weather-aware confirmations: heat-raising steps get forecast context
+  // ("Rain is forecast tomorrow 3–4 PM") right on the confirm card.
+  const advisories: string[] = [];
+  for (const call of writes) {
+    if (call.tool !== "set_heat") continue;
+    const args = call.args;
+    const turnsOn = args.mode !== undefined && args.mode !== "off";
+    const raises = args.setpoint !== undefined;
+    if (!turnsOn && !raises) continue;
+    try {
+      const { heatAdvisories } = await import("@/server/weather");
+      for (const a of await heatAdvisories(args.body, args.setpoint)) {
+        if (!advisories.includes(a.message)) advisories.push(a.message);
+      }
+    } catch {
+      // advisory lookup must never block a plan
+    }
+  }
+
+  const plan: StoredPlan = {
+    calls: writes,
+    summary,
+    ...(note ? { note } : {}),
+    ...(advisories.length > 0 ? { advisories } : {}),
+  };
   const intro =
     writes.length === 1 ? "Here's what I'll do — confirm and I'm on it:" : `Here's the plan (${writes.length} steps) — confirm and I'm on it:`;
   const content = readTexts.length > 0 ? `${readTexts.join("\n\n")}\n\n${intro}` : intro;
