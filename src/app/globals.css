@@ -1,0 +1,223 @@
+@import "tailwindcss";
+
+/*
+ * Moonpool design tokens.
+ * Direction: "night swim" — standing at the edge of a lit pool at night.
+ * Deep teal-navy darks (never flat gray-black), underwater glow, glassy
+ * translucent panels. Every color routes through CSS variables so theme
+ * presets and the custom accent swap live with a cross-fade.
+ */
+
+@theme inline {
+  --color-abyss: var(--abyss);
+  --color-deep: var(--deep);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-glass: var(--glass);
+  --color-line: var(--line);
+  --color-line-bright: var(--line-bright);
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-ink-faint: var(--ink-faint);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-deep: var(--accent-deep);
+  --color-heat: var(--heat);
+  --color-heat-soft: var(--heat-soft);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --font-display: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
+  --radius-panel: 1.25rem;
+  --shadow-glow: 0 0 24px color-mix(in oklab, var(--accent) 35%, transparent);
+  --shadow-panel: 0 8px 32px rgba(1, 8, 14, 0.45);
+}
+
+/* ── Night (default) ─────────────────────────────────────────── */
+:root,
+:root[data-mode="dark"] {
+  --accent-h: 187;
+  --accent-s: 78%;
+  --accent-l: 62%;
+
+  --abyss: #030b12;
+  --deep: #071522;
+  --surface: rgba(12, 33, 48, 0.62);
+  --surface-2: rgba(18, 45, 64, 0.72);
+  --glass: rgba(10, 28, 42, 0.5);
+  --line: rgba(126, 211, 232, 0.09);
+  --line-bright: rgba(126, 211, 232, 0.22);
+  --ink: #e6f3f7;
+  --ink-dim: #94b8c7;
+  --ink-faint: #5b7c8c;
+  --accent: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
+  --accent-soft: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.16);
+  --accent-deep: hsl(var(--accent-h) var(--accent-s) 38%);
+  --heat: #ff9d5c;
+  --heat-soft: rgba(255, 157, 92, 0.16);
+  --ok: #51df9a;
+  --warn: #ffd166;
+  --danger: #ff7d7d;
+
+  color-scheme: dark;
+}
+
+/* OLED: true-black base, panels keep their tint */
+:root[data-oled="true"][data-mode="dark"] {
+  --abyss: #000000;
+  --deep: #02080d;
+}
+
+/* ── Daylight ────────────────────────────────────────────────── */
+:root[data-mode="light"] {
+  --abyss: #e8f4f8;
+  --deep: #d6ecf4;
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-2: rgba(255, 255, 255, 0.88);
+  --glass: rgba(255, 255, 255, 0.6);
+  --line: rgba(8, 68, 94, 0.1);
+  --line-bright: rgba(8, 68, 94, 0.22);
+  --ink: #0b2836;
+  --ink-dim: #3d6376;
+  --ink-faint: #7d9dac;
+  --accent: hsl(var(--accent-h) var(--accent-s) 40%);
+  --accent-soft: hsl(var(--accent-h) var(--accent-s) 40% / 0.14);
+  --accent-deep: hsl(var(--accent-h) var(--accent-s) 30%);
+  --heat: #e2662a;
+  --heat-soft: rgba(226, 102, 42, 0.14);
+  --ok: #14935c;
+  --warn: #b07d08;
+  --danger: #d5484f;
+
+  color-scheme: light;
+}
+
+/* Theme cross-fade: applied briefly when mode/accent changes */
+:root[data-theme-fade="true"],
+:root[data-theme-fade="true"] * {
+  transition:
+    background-color 450ms ease,
+    border-color 450ms ease,
+    color 450ms ease,
+    fill 450ms ease,
+    box-shadow 450ms ease !important;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--abyss);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+/* Ambient depth gradient above the canvas caustics */
+.pool-gradient {
+  background:
+    radial-gradient(120% 90% at 50% -10%, color-mix(in oklab, var(--accent) 9%, transparent), transparent 60%),
+    radial-gradient(100% 70% at 85% 110%, color-mix(in oklab, var(--accent) 7%, transparent), transparent 55%),
+    linear-gradient(180deg, var(--abyss) 0%, var(--deep) 55%, var(--abyss) 100%);
+}
+
+.glass {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(18px) saturate(1.25);
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  box-shadow: var(--shadow-panel);
+}
+
+.glass-bright {
+  background: var(--surface-2);
+  border: 1px solid var(--line-bright);
+  backdrop-filter: blur(22px) saturate(1.3);
+  -webkit-backdrop-filter: blur(22px) saturate(1.3);
+}
+
+/* Oversized temperature numerals — the anchor of the whole app */
+.temp-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.glow-accent {
+  box-shadow: var(--shadow-glow);
+}
+
+.text-glow {
+  text-shadow: 0 0 18px color-mix(in oklab, var(--accent) 45%, transparent);
+}
+
+/* Soft pulse for actively-running equipment */
+@keyframes equipment-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 30%, transparent); }
+  50% { box-shadow: 0 0 0 7px transparent; }
+}
+.pulse-active {
+  animation: equipment-pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes heat-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--heat) 35%, transparent); }
+  50% { box-shadow: 0 0 0 7px transparent; }
+}
+.pulse-heat {
+  animation: heat-pulse 2.2s ease-in-out infinite;
+}
+
+/* Shimmer skeletons */
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  border-radius: 0.75rem;
+  background: linear-gradient(
+    90deg,
+    var(--surface) 25%,
+    color-mix(in oklab, var(--accent) 7%, var(--surface)) 50%,
+    var(--surface) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* Water-ripple press feedback */
+@keyframes ripple-press {
+  from { transform: scale(0); opacity: 0.5; }
+  to { transform: scale(2.6); opacity: 0; }
+}
+.ripple-ink {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: color-mix(in oklab, var(--accent) 45%, transparent);
+  animation: ripple-press 550ms ease-out forwards;
+}
+
+/* Hide scrollbars on horizontal snap rows without killing scroll */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Range slider baseline reset (custom sliders are Radix-based) */
+input[type="range"] { accent-color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-active, .pulse-heat, .skeleton { animation: none; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Safe-area padding for phones (bottom nav) */
+.pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
