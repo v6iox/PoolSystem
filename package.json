@@ -2,7 +2,7 @@
   "name": "moonpool",
   "version": "1.0.0",
   "private": true,
-  "description": "Moonpool — self-hosted pool control platform replacing Pentair ScreenLogic",
+  "description": "Moonpool - self-hosted pool control for Pentair panels via nodejs-poolController. Night-swim UI, roles, automations, local AI copilot. Everything on your Pi.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -54,5 +54,6 @@
     "tailwindcss": "^4.0.9",
     "typescript": "^5.7.3",
     "vitest": "^3.0.7"
-  }
+  },
+  "license": "MIT"
 }

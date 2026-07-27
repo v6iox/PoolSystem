@@ -158,7 +158,7 @@ export default function IntegrationsPage(): React.JSX.Element {
               log. Only a hash is stored — copy new tokens immediately.
             </p>
             <div className="mb-3 flex gap-2">
-              <Input placeholder="Label (e.g. Spencer's iPhone)" value={label} onChange={(e) => setLabel(e.target.value)} />
+              <Input placeholder="Label (e.g. My iPhone)" value={label} onChange={(e) => setLabel(e.target.value)} />
               <Button variant="primary" disabled={busy} onClick={() => void mint()}>
                 <Plus size={15} /> Create
               </Button>
