@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseUtterance } from "@/server/copilot/mock-parser";
 import { parseWithLlm } from "@/server/copilot/llm";
-import { validateToolCall } from "@/server/copilot/tools";
+import { RESPONSE_JSON_SCHEMA, TOOL_DEFS, toolSignature, validateToolCall } from "@/server/copilot/tools";
 import type { CopilotContext, ToolCall } from "@/server/copilot/tools";
 import { EMPTY_SNAPSHOT, type CircuitState, type PoolStateSnapshot } from "@/types/pool";
 
@@ -385,6 +385,22 @@ describe("parity tools (validateToolCall)", () => {
     expect(guest.ok).toBe(false);
     const owner = validateToolCall({ tool: "get_water_status", args: {} }, ctx);
     expect(owner.ok).toBe(true);
+  });
+});
+
+describe("LLM response schema stays grammar-friendly", () => {
+  it("has no per-tool anyOf (melts Ollama's constrained sampler)", () => {
+    expect(JSON.stringify(RESPONSE_JSON_SCHEMA)).not.toContain("anyOf");
+    const items = (RESPONSE_JSON_SCHEMA as { properties: { tool_calls: { items: { properties: { tool: { enum: string[] } } } } } })
+      .properties.tool_calls.items;
+    expect(items.properties.tool.enum).toHaveLength(TOOL_DEFS.length);
+  });
+
+  it("prompt signatures carry the arg shapes instead", () => {
+    const defs = Object.fromEntries(TOOL_DEFS.map((d) => [d.name, d]));
+    expect(toolSignature(defs.set_circuit!)).toBe("set_circuit(circuitId:number, state:boolean)");
+    expect(toolSignature(defs.schedule_once!)).toBe("schedule_once(actions:call[], at?:string, inMinutes?:number)");
+    expect(toolSignature(defs.get_status!)).toBe("get_status(scope?:temps|circuits|chemistry|equipment|all)");
   });
 });
 
