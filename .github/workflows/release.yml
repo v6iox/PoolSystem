@@ -38,6 +38,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag_name || github.ref_name }}
+          # Pin the tag to the commit this run checked out — without this a
+          # dispatch-created tag lands on the default branch instead.
+          target_commitish: ${{ github.sha }}
           name: Moonpool ${{ inputs.tag_name || github.ref_name }}
           body_path: .github/RELEASE_NOTES.md
           files: install.sh

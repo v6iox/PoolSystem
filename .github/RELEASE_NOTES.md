@@ -1,4 +1,4 @@
-## Moonpool v1.0.1 🌙
+## Moonpool v1.0.2 🌙
 
 **New since v1.0.0: built-in auto-updates.** Settings → System → Software
 updates shows your version vs. the latest release, with a **Check for
