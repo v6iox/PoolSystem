@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+#
+# moonpool — one command to run the thing.
+#
+#   moonpool start      start Moonpool (dev server on a source checkout,
+#                       Docker stack on an installed Pi)
+#   moonpool stop       stop it
+#   moonpool restart    stop + start
+#   moonpool status     is it running?
+#   moonpool logs       follow logs
+#   moonpool update     update to the latest code and restart
+#   moonpool open       open the app in a browser
+#   moonpool link       put `moonpool` on your PATH (run once)
+#
+# Mode is auto-detected (override with MOONPOOL_MODE=source|docker).
+#
+set -euo pipefail
+
+# Resolve the repo root from wherever this script (or its symlink) lives.
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L $SOURCE ]]; do SOURCE="$(readlink "$SOURCE")"; done
+ROOT="$(cd "$(dirname "$SOURCE")/.." && pwd)"
+cd "$ROOT"
+
+PIDFILE="$ROOT/.moonpool-dev.pid"
+LOGFILE="$ROOT/.moonpool-dev.log"
+URL="http://localhost:3000"
+
+if [[ -t 2 ]]; then
+  BOLD=$'\033[1m'; DIM=$'\033[2m'; CYAN=$'\033[38;5;80m'; GREEN=$'\033[38;5;114m'; RED=$'\033[38;5;174m'; RESET=$'\033[0m'
+else
+  BOLD=""; DIM=""; CYAN=""; GREEN=""; RED=""; RESET=""
+fi
+say() { printf '%b\n' "$*" >&2; }
+
+mode() {
+  if [[ "${MOONPOOL_MODE:-}" == "source" || "${MOONPOOL_MODE:-}" == "docker" ]]; then
+    echo "$MOONPOOL_MODE"; return
+  fi
+  # Docker mode when this checkout has a compose project with containers.
+  if command -v docker >/dev/null 2>&1 && [[ -n "$(docker compose ps -aq web 2>/dev/null)" ]]; then
+    echo docker; return
+  fi
+  echo source
+}
+
+dev_pid() {
+  [[ -f $PIDFILE ]] || return 1
+  local pid
+  pid="$(cat "$PIDFILE" 2>/dev/null)"
+  [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null && { echo "$pid"; return 0; }
+  return 1
+}
+
+is_up() { curl -s -o /dev/null --max-time 2 "$URL/login" 2>/dev/null; }
+
+wait_up() {
+  for _ in $(seq 1 90); do is_up && return 0; sleep 1; done
+  return 1
+}
+
+start_source() {
+  if pid="$(dev_pid)"; then
+    say "${GREEN}already running${RESET} (pid $pid) — $URL"; return
+  fi
+  [[ -d node_modules ]] || { say "Installing dependencies (first run)…"; npm install --no-audit --no-fund; }
+  [[ -f .env.local ]] || cp .env.example .env.local
+  say "Starting Moonpool dev server…"
+  nohup npm run dev >"$LOGFILE" 2>&1 &
+  echo $! >"$PIDFILE"
+  if wait_up; then
+    say "${GREEN}● Moonpool is up${RESET} — ${CYAN}$URL${RESET}   ${DIM}(moonpool logs · moonpool stop)${RESET}"
+    command -v open >/dev/null && open "$URL" || true
+  else
+    say "${RED}didn't come up in 90s${RESET} — check: moonpool logs"
+    exit 1
+  fi
+}
+
+kill_tree() { # depth-first TERM of a process and all descendants
+  local p child
+  for child in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$child"; done
+  kill "$1" 2>/dev/null || true
+}
+
+port_pids() { command -v lsof >/dev/null 2>&1 && lsof -ti tcp:3000 2>/dev/null || true; }
+
+stop_source() {
+  local stopped=0
+  if pid="$(dev_pid)"; then
+    kill_tree "$pid"
+    stopped=1
+  fi
+  rm -f "$PIDFILE"
+  # Any `next dev` started from THIS repo (covers orphans whose pidfile is gone).
+  for p in $(pgrep -f "$ROOT/.*next" 2>/dev/null); do
+    kill_tree "$p"
+    stopped=1
+  done
+  # Belt & braces: anything still serving :3000 that looks like next.
+  for p in $(port_pids); do
+    if ps -o command= -p "$p" 2>/dev/null | grep -q "next"; then
+      kill "$p" 2>/dev/null || true
+      stopped=1
+    fi
+  done
+  # Give it a moment; escalate if the port is still held by next.
+  for _ in 1 2 3 4 5 6; do
+    [[ -z "$(port_pids)" ]] && break
+    sleep 0.5
+  done
+  for p in $(port_pids); do
+    ps -o command= -p "$p" 2>/dev/null | grep -q "next" && kill -9 "$p" 2>/dev/null || true
+  done
+  [[ $stopped -eq 1 ]] && say "${GREEN}stopped${RESET}" || say "wasn't running"
+}
+
+case_docker() {
+  local args=()
+  grep -q '^TUNNEL_TOKEN=..*' .env 2>/dev/null && args=(--profile remote)
+  case "$1" in
+    start)   docker compose "${args[@]}" up -d; say "${GREEN}● Moonpool stack up${RESET} — ${CYAN}$URL${RESET}" ;;
+    stop)    docker compose stop; say "${GREEN}stopped${RESET} ${DIM}(containers kept; data safe)${RESET}" ;;
+    status)  docker compose ps ;;
+    logs)    docker compose logs -f --tail 100 web njspc ;;
+    update)  ./install.sh --update ;;
+  esac
+}
+
+cmd="${1:-help}"
+case "$cmd" in
+  start|stop|status|logs|update)
+    if [[ "$(mode)" == "docker" ]]; then
+      case_docker "$cmd"
+    else
+      case "$cmd" in
+        start) start_source ;;
+        stop) stop_source ;;
+        status)
+          if pid="$(dev_pid)"; then
+            if is_up; then say "${GREEN}● running${RESET} (pid $pid) — $URL"; else say "starting… (pid $pid)"; fi
+          elif is_up; then
+            say "${GREEN}● something is serving $URL${RESET} (not started by this tool)"
+          else
+            say "${RED}○ not running${RESET}"
+          fi ;;
+        logs) touch "$LOGFILE"; tail -n 100 -f "$LOGFILE" ;;
+        update)
+          say "Updating checkout…"
+          git pull --ff-only
+          npm install --no-audit --no-fund
+          if dev_pid >/dev/null 2>&1; then stop_source; start_source; else say "Updated. moonpool start when ready."; fi ;;
+      esac
+    fi
+    ;;
+  restart)
+    "$0" stop || true
+    "$0" start
+    ;;
+  open)
+    command -v open >/dev/null && open "$URL" || say "$URL"
+    ;;
+  link)
+    target=""
+    for dir in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
+      [[ -d $dir && -w $dir ]] && { target="$dir"; break; }
+    done
+    if [[ -z $target ]]; then
+      mkdir -p "$HOME/.local/bin"
+      target="$HOME/.local/bin"
+    fi
+    ln -sf "$ROOT/scripts/moonpool" "$target/moonpool"
+    say "${GREEN}linked${RESET} → $target/moonpool"
+    case ":$PATH:" in
+      *":$target:"*) ;;
+      *) say "add it to your PATH: ${CYAN}echo 'export PATH=\"$target:\$PATH\"' >> ~/.zshrc && source ~/.zshrc${RESET}" ;;
+    esac
+    ;;
+  help|--help|-h|*)
+    sed -n '3,16p' "$SOURCE" | sed 's/^# \{0,1\}//'
+    ;;
+esac

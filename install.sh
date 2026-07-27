@@ -326,6 +326,9 @@ if [[ $PULL_MODEL -eq 1 ]]; then
   compose exec ollama ollama pull qwen3:1.7b || warn "Model pull failed — run later: docker compose exec ollama ollama pull qwen3:1.7b"
 fi
 
+# Put the `moonpool` command on PATH (start/stop/status/logs/update).
+"$INSTALL_DIR/scripts/moonpool" link >/dev/null 2>&1 || true
+
 step "Waiting for Moonpool to come up"
 up=0
 for _ in $(seq 1 60); do
