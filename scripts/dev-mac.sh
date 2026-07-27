@@ -12,11 +12,13 @@ cd "$(dirname "$0")/.."
 
 PI_IP=""
 RESET=0
+NO_OLLAMA=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pi) shift; PI_IP="${1:?--pi needs the Pi IP address}" ;;
     --reset) RESET=1 ;;
-    *) echo "unknown flag: $1 (use --pi <ip> or --reset)"; exit 1 ;;
+    --no-ollama) NO_OLLAMA=1 ;;
+    *) echo "unknown flag: $1 (use --pi <ip>, --reset, --no-ollama)"; exit 1 ;;
   esac
   shift
 done
@@ -64,6 +66,63 @@ if [[ $RESET -eq 1 ]]; then
   rm -rf data
   echo "Dev database wiped — you'll get the first-run owner setup again."
 fi
+
+# ── Ollama for the local AI copilot (opt-in, interactive only) ──────────
+set_env_local() {
+  local key="$1" value="$2"
+  if grep -q "^${key}=" .env.local 2>/dev/null; then
+    sed -i.bak "s|^${key}=.*|${key}=${value}|" .env.local && rm -f .env.local.bak
+  else
+    printf '%s=%s\n' "$key" "$value" >> .env.local
+  fi
+}
+
+ollama_up() { curl -s --max-time 2 http://localhost:11434/api/version >/dev/null 2>&1; }
+
+setup_ollama() {
+  local model="qwen3:1.7b"
+  [[ $NO_OLLAMA -eq 1 ]] && return 0
+  [[ -t 0 ]] || return 0
+
+  if ! command -v ollama >/dev/null 2>&1; then
+    if ! command -v brew >/dev/null 2>&1; then
+      echo "Tip: install Ollama from https://ollama.com for a local AI copilot (skipping — no Homebrew)."
+      return 0
+    fi
+    printf 'Install Ollama so the AI copilot runs locally? ~1.4 GB model download. [Y/n] '
+    local answer=""
+    read -r answer || true
+    [[ "$answer" =~ ^[Nn] ]] && return 0
+    brew install ollama
+  fi
+
+  if ! ollama_up; then
+    echo "Starting the Ollama server…"
+    if command -v brew >/dev/null 2>&1 && brew list ollama >/dev/null 2>&1; then
+      brew services start ollama >/dev/null 2>&1 || true
+    fi
+    if ! ollama_up; then
+      nohup ollama serve > .ollama-dev.log 2>&1 &
+    fi
+    for _ in $(seq 1 20); do ollama_up && break; sleep 1; done
+    if ! ollama_up; then
+      echo "Ollama didn't start — the copilot will use the built-in parser. Start it manually and re-run."
+      return 0
+    fi
+  fi
+
+  if ! ollama list 2>/dev/null | grep -q "^${model}"; then
+    echo "Downloading the copilot model (${model})…"
+    ollama pull "$model" || { echo "Model pull failed — copilot falls back to the built-in parser."; return 0; }
+  fi
+
+  set_env_local COPILOT_BASE_URL "http://localhost:11434/v1"
+  set_env_local COPILOT_MODEL "$model"
+  set_env_local COPILOT_FORCE_LLM "true"
+  echo "Ollama ready — the copilot will use ${model} (change models in Settings → Voice & AI)."
+}
+
+setup_ollama
 
 # Open the browser once the server answers, then hand over to next dev.
 ( for _ in $(seq 1 60); do

@@ -235,6 +235,9 @@ export const RESPONSE_JSON_SCHEMA: JsonSchema = {
       },
     },
     needs_confirmation_note: { type: "string" },
+    /** Conversational reply, used ONLY when tool_calls is empty (greetings,
+     *  small talk). Facts and action results always come from templates. */
+    reply: { type: "string" },
   },
   required: ["tool_calls"],
   additionalProperties: false,

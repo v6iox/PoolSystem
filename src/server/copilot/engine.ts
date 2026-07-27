@@ -386,6 +386,7 @@ export async function processMessage(
 
   let rawCalls: unknown[] = [];
   let note: string | undefined;
+  let chatReply: string | undefined;
   {
     try {
       // Dispatches to the configured brain: local Ollama / OpenAI API key /
@@ -393,6 +394,7 @@ export async function processMessage(
       const parsed = await parseWithProvider(trimmed, ctx);
       rawCalls = parsed.calls;
       note = parsed.note;
+      chatReply = parsed.reply;
     } catch (err) {
       const detail = err instanceof CopilotBackendError ? err.message : "copilot backend unreachable";
       const assistant = insertMessage(
@@ -405,7 +407,9 @@ export async function processMessage(
   }
 
   if (rawCalls.length === 0) {
-    return { messages: [userMsg, insertMessage(threadId, "assistant", note ?? UNKNOWN_REPLY)] };
+    // No action to take: a conversational LLM reply (greeting/small talk)
+    // beats the canned fallback. Facts/actions never come from chatReply.
+    return { messages: [userMsg, insertMessage(threadId, "assistant", chatReply ?? note ?? UNKNOWN_REPLY)] };
   }
 
   // Special intent: cancel the newest pending plan in this thread.
@@ -442,7 +446,11 @@ export async function processMessage(
 
   // Pure read → answer immediately with live data.
   if (writes.length === 0) {
-    return { messages: [userMsg, insertMessage(threadId, "assistant", readTexts.join("\n\n") || UNKNOWN_REPLY)] };
+    // Facts come from templates over live data; the model may add a short
+    // conversational lead-in on top.
+    const factBody = readTexts.join("\n\n");
+    const answer = factBody ? (chatReply ? `${chatReply}\n\n${factBody}` : factBody) : (chatReply ?? UNKNOWN_REPLY);
+    return { messages: [userMsg, insertMessage(threadId, "assistant", answer)] };
   }
 
   // State-changing → persist a pending plan and ask for confirmation.
@@ -474,7 +482,8 @@ export async function processMessage(
     ...(advisories.length > 0 ? { advisories } : {}),
   };
   const intro =
-    writes.length === 1 ? "Here's what I'll do — confirm and I'm on it:" : `Here's the plan (${writes.length} steps) — confirm and I'm on it:`;
+    chatReply ??
+    (writes.length === 1 ? "Here's what I'll do — confirm and I'm on it:" : `Here's the plan (${writes.length} steps) — confirm and I'm on it:`);
   const content = readTexts.length > 0 ? `${readTexts.join("\n\n")}\n\n${intro}` : intro;
   const assistant = insertMessage(threadId, "assistant", content, plan, "pending");
   return { messages: [userMsg, assistant] };
