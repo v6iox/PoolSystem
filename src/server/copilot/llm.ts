@@ -42,6 +42,10 @@ export function cleanReply(value: unknown): string | undefined {
 export function buildSystemPrompt(ctx: CopilotContext): string {
   const snap = ctx.snapshot;
   const deg = `°${snap.units}`;
+  const nd = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][nd.getDay()] ?? "";
+  const nowLine = `${day} ${nd.getFullYear()}-${pad(nd.getMonth() + 1)}-${pad(nd.getDate())} ${pad(nd.getHours())}:${pad(nd.getMinutes())}`;
   const bodies = snap.bodies
     .map(
       (b) =>
@@ -61,9 +65,9 @@ export function buildSystemPrompt(ctx: CopilotContext): string {
 
   return [
     "You are Moonpool's pool copilot. You translate pool-owner requests into STRUCTURED TOOL CALLS. Reply with JSON matching the schema: {\"tool_calls\":[{\"tool\":\"…\",\"args\":{…}}], \"needs_confirmation_note\":\"optional caveat\", \"reply\":\"optional\"}.",
-    "Act ONLY on what the CURRENT message asks. If it doesn't clearly request a change or a question you can answer, tool_calls MUST be []. Never invent actions, and never copy the examples below — they only illustrate the format.",
+    "Act ONLY on what the NEWEST user message asks. Earlier turns in the conversation are context — already handled — use them ONLY to resolve references (\"it\", \"that\", \"actually make it 3 hours\"). If the newest message doesn't clearly request a change or a question you can answer, tool_calls MUST be []. Never invent actions, and never copy the examples below — they only illustrate the format.",
     "PERSONALITY — you are a calm, capable pool assistant; friendly but never over the top (no exclamation storms, emoji only if the user uses them). Use \"reply\" for your voice: with NO tool calls (greeting/small talk/out of scope) reply IS the whole answer, 1–2 short sentences. WITH tool calls, reply is an optional short lead-in (≤1 sentence, e.g. \"Sure — here's where things stand.\" or \"Good call on a night like this —\"). CRITICAL: never put temperatures, readings, times or any facts in reply — the app appends real data from the tools; your reply must read naturally next to it.",
-    `LIVE STATE — bodies: ${bodies || "none"}. air ${snap.airTemp !== null ? Math.round(snap.airTemp) + deg : "?"}.`,
+    `LIVE STATE — now: ${nowLine}. bodies: ${bodies || "none"}. air ${snap.airTemp !== null ? Math.round(snap.airTemp) + deg : "?"}.`,
     `circuits (id:name, * = light): ${circuits || "none"}`,
     `scenes: ${scenes} | light themes: ${themes}`,
     `automations (${ctx.automations.length}): ${automations}`,
@@ -71,9 +75,9 @@ export function buildSystemPrompt(ctx: CopilotContext): string {
     ctx.pendingPlan ? "There IS a pending unconfirmed plan (cancel_pending applies to it)." : "No pending plan.",
     `TOOLS:\n${tools}`,
     'Rules: use numeric ids from the state above. Times are "HH:MM" 24h ("8" in the evening = "20:00", midnight = "00:00") or ISO. days: 0=Sun..6=Sat, [] = every day. Questions → get_status. "a bit warmer" = current setpoint +2.',
-    "Timed requests: one-off (\"tonight at 10\") → schedule_once. Recurring ON/OFF window for ONE circuit (\"run the cleaner 9 to 11 every weekday\") → create_schedule (a panel schedule — keeps working even if this server is off). Recurring anything else (sunset, temperatures, multi-step, lights themes) → create_automation.",
+    "Timed requests: relative (\"in 2 hours\", \"in 45 min\") → schedule_once with inMinutes counted from now — do NOT do clock math yourself. Other one-offs (\"tonight at 10\") → schedule_once with at (\"HH:MM\", or ISO \"YYYY-MM-DDTHH:MM\" computed from now above for \"tomorrow at 3pm\"). Recurring ON/OFF window for ONE circuit (\"run the cleaner 9 to 11 every weekday\") → create_schedule (a panel schedule — keeps working even if this server is off). Recurring anything else (sunset, temperatures, multi-step, lights themes) → create_automation.",
     "Also: pump speed → set_pump_speed. \"I added water / topped it off\" → log_water_refill. \"do we need water?\" → get_water_status. \"make/save a scene …\" → create_scene (saves, doesn't run).",
-    'Examples: "turn on the waterfall" → {"tool_calls":[{"tool":"set_circuit","args":{"circuitId":<id of Waterfall>,"state":true}}]} · "warm the spa a bit" → {"tool_calls":[{"tool":"set_heat","args":{"body":"spa","setpoint":<current spa target + 2>}}]} · "everything off at 11pm" → {"tool_calls":[{"tool":"schedule_once","args":{"at":"23:00","actions":[{"tool":"all_off","args":{}}]}}]} · "lights blue at sunset every friday" → {"tool_calls":[{"tool":"create_automation","args":{"name":"Lights blue at sunset","trigger":{"type":"sun","event":"sunset","offsetMinutes":0,"days":[5]},"actions":[{"tool":"set_light_theme","args":{"theme":"Blue"}}]}}]}',
+    'Examples: "turn on the waterfall" → {"tool_calls":[{"tool":"set_circuit","args":{"circuitId":<id of Waterfall>,"state":true}}]} · "warm the spa a bit" → {"tool_calls":[{"tool":"set_heat","args":{"body":"spa","setpoint":<current spa target + 2>}}]} · "in 2 hours heat the hot tub" → {"tool_calls":[{"tool":"schedule_once","args":{"inMinutes":120,"actions":[{"tool":"set_heat","args":{"body":"spa","mode":"heater"}}]}}]} · "everything off at 11pm" → {"tool_calls":[{"tool":"schedule_once","args":{"at":"23:00","actions":[{"tool":"all_off","args":{}}]}}]} · "lights blue at sunset every friday" → {"tool_calls":[{"tool":"create_automation","args":{"name":"Lights blue at sunset","trigger":{"type":"sun","event":"sunset","offsetMinutes":0,"days":[5]},"actions":[{"tool":"set_light_theme","args":{"theme":"Blue"}}]}}]}',
   ].join("\n");
 }
 
@@ -104,6 +108,7 @@ export async function parseWithLlm(text: string, ctx: CopilotContext, overrides:
         stream: false,
         messages: [
           { role: "system", content: buildSystemPrompt(ctx) },
+          ...(ctx.history ?? []).map((h) => ({ role: h.role, content: h.content })),
           { role: "user", content: text },
         ],
         response_format: {

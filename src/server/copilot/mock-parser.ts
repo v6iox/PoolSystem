@@ -59,6 +59,32 @@ function extractTimePhrase(segment: string): { at: string | null; rest: string }
   return { at, rest };
 }
 
+const REL_WORDY: Array<[RegExp, number]> = [
+  [/\bin (?:about |around |roughly )?an? hour and a half\b/, 90],
+  [/\bin (?:about |around |roughly )?half an? hour\b/, 30],
+  [/\bin (?:about |around |roughly )?an? hour\b/, 60],
+  [/\bin (?:about |around |roughly )?a couple(?: of)? hours\b/, 120],
+  [/\bin (?:about |around |roughly )?a few hours\b/, 180],
+  [/\bin (?:about |around |roughly )?a minute\b/, 1],
+];
+
+const REL_NUMERIC = /\bin (?:about |around |roughly )?(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|min|m)\b/;
+
+/** Pull an "in 2 hours"-style phrase out of a segment → minutes from now. */
+function extractRelativePhrase(segment: string): { inMinutes: number | null; rest: string } {
+  for (const [re, mins] of REL_WORDY) {
+    const m = re.exec(segment);
+    if (m) return { inMinutes: mins, rest: segment.replace(m[0], " ").replace(/\s+/g, " ").trim() };
+  }
+  const m = REL_NUMERIC.exec(segment);
+  if (m && m[1] !== undefined && m[2] !== undefined) {
+    const n = Number(m[1]);
+    const mins = Math.round(m[2].startsWith("h") ? n * 60 : n);
+    if (mins >= 1) return { inMinutes: mins, rest: segment.replace(m[0], " ").replace(/\s+/g, " ").trim() };
+  }
+  return { inMinutes: null, rest: segment };
+}
+
 const DAY_NAMES: Record<string, number> = {
   sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
 };
@@ -425,6 +451,15 @@ export function parseUtterance(text: string, ctx: CopilotContext): MockParseResu
   const calls: ToolCall[] = [];
   for (const segment of segments) {
     if (!segment.trim()) continue;
+    // relative first: "heat the hot tub in 2 hours" / "in 45 min turn off the jets"
+    const rel = extractRelativePhrase(segment);
+    if (rel.inMinutes !== null) {
+      const relCalls = parseCommandSegment(rel.rest, ctx);
+      if (relCalls.length > 0) {
+        calls.push({ tool: "schedule_once", args: { inMinutes: rel.inMinutes, actions: relCalls } });
+        continue;
+      }
+    }
     const { at, rest } = extractTimePhrase(segment);
     const segmentCalls = parseCommandSegment(at !== null ? rest : segment, ctx);
     if (segmentCalls.length === 0) continue;

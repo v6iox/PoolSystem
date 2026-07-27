@@ -20,6 +20,7 @@ import {
   toolCallToActions,
   validateToolCall,
   type AutomationLite,
+  type ChatTurn,
   type CopilotContext,
   type SceneLite,
   type StatusScope,
@@ -143,7 +144,13 @@ export function listMessages(threadId: number): CopilotMessageDto[] {
 
 /* ── context ────────────────────────────────────────────────────────────── */
 
-function buildContext(role: Role, threadId: number): CopilotContext {
+/**
+ * historyBeforeId: when set, the last few turns before that message are
+ * included so LLM backends can resolve follow-ups ("actually make it 3
+ * hours"). Plan proposals carry their summary + outcome so the model knows
+ * what was actually done vs. cancelled.
+ */
+function buildContext(role: Role, threadId: number, historyBeforeId?: number): CopilotContext {
   const db = getDb();
   const snapshot = getRuntime().getSnapshotForRole(role);
   const sceneRows = db.prepare("SELECT id, name, guest_visible FROM scenes ORDER BY position, id").all() as Array<{
@@ -181,7 +188,36 @@ function buildContext(role: Role, threadId: number): CopilotContext {
       pendingPlan = null;
     }
   }
-  return { snapshot, scenes, automations, pendingPlan, role, guestVisibleCircuitIds: new Set(guestRows.map((r) => r.circuit_id)) };
+  let history: ChatTurn[] | undefined;
+  if (historyBeforeId !== undefined) {
+    const historyRows = db
+      .prepare(
+        "SELECT role, content, plan, plan_state FROM copilot_messages WHERE thread_id = ? AND id < ? ORDER BY id DESC LIMIT 8"
+      )
+      .all(threadId, historyBeforeId) as Array<Pick<MessageRow, "role" | "content" | "plan" | "plan_state">>;
+    history = historyRows.reverse().map((r) => {
+      let content = r.content;
+      if (r.plan) {
+        try {
+          const stored = JSON.parse(r.plan) as StoredPlan;
+          content += ` [proposed: ${stored.summary.join("; ")} — ${r.plan_state ?? "pending"}]`;
+        } catch {
+          // unreadable plan → plain content is enough context
+        }
+      }
+      return { role: r.role, content: content.slice(0, 280) };
+    });
+    if (history.length === 0) history = undefined;
+  }
+  return {
+    snapshot,
+    scenes,
+    automations,
+    pendingPlan,
+    role,
+    guestVisibleCircuitIds: new Set(guestRows.map((r) => r.circuit_id)),
+    ...(history ? { history } : {}),
+  };
 }
 
 /* ── template status replies (real data, no LLM) ────────────────────────── */
@@ -400,7 +436,7 @@ export async function processMessage(
     db.prepare("UPDATE copilot_threads SET title = ? WHERE id = ?").run(trimmed.slice(0, 48), threadId);
   }
 
-  const ctx = buildContext(user.role, threadId);
+  const ctx = buildContext(user.role, threadId, userMsg.id);
 
   let rawCalls: unknown[] = [];
   let note: string | undefined;
@@ -649,9 +685,14 @@ async function executeToolCall(
     }
 
     case "schedule_once": {
-      const fireAt = resolveAt(call.args.at);
+      const fireAt =
+        call.args.inMinutes !== undefined
+          ? Date.now() + call.args.inMinutes * 60_000
+          : call.args.at !== undefined
+            ? resolveAt(call.args.at)
+            : null;
       if (fireAt === null || fireAt <= Date.now()) {
-        return { ok: false, line: `Failed: the time "${call.args.at}" is in the past.` };
+        return { ok: false, line: `Failed: the time "${call.args.at ?? "?"}" is in the past.` };
       }
       const actions: PoolAction[] = call.args.actions.flatMap((inner) => toolCallToActions(inner, ctx));
       if (actions.length === 0) return { ok: false, line: "Failed: nothing to schedule." };
