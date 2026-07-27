@@ -3,6 +3,7 @@ import { getRuntime } from "@/server/runtime";
 import { audit } from "@/server/audit";
 import { createScheduledJob, executeActions, type ActionContext } from "@/server/control";
 import { reloadAutomations } from "@/server/automations/worker";
+import { estimateWaterLevel, recordRefill } from "@/server/water";
 import { formatClock, formatDays, formatMinutes, formatRelative } from "@/lib/utils";
 import type { SessionUser } from "@/types/auth";
 import type { Role } from "@/types/auth";
@@ -337,10 +338,14 @@ function schedulesReply(ctx: CopilotContext): string {
   return `Panel schedules (these run in the panel itself):\n${lines.map((l) => `• ${l}`).join("\n")}`;
 }
 
-function runReadTool(call: ToolCall, ctx: CopilotContext): string {
+async function runReadTool(call: ToolCall, ctx: CopilotContext): Promise<string> {
   if (call.tool === "get_status") return statusReply(call.args.scope ?? "all", ctx);
   if (call.tool === "list_automations") return automationsReply(ctx);
   if (call.tool === "list_schedules") return schedulesReply(ctx);
+  if (call.tool === "get_water_status") {
+    const water = await estimateWaterLevel();
+    return water.available ? water.message : "I can't estimate the water level right now (no weather data).";
+  }
   return "";
 }
 
@@ -461,7 +466,7 @@ export async function processMessage(
 
   const reads = validated.filter((c) => isReadOnlyTool(c.tool));
   const writes = validated.filter((c) => !isReadOnlyTool(c.tool) && c.tool !== "cancel_pending");
-  const readTexts = reads.map((c) => runReadTool(c, ctx));
+  const readTexts = await Promise.all(reads.map((c) => runReadTool(c, ctx)));
 
   // Pure read → answer immediately with live data.
   if (writes.length === 0) {
@@ -520,7 +525,8 @@ async function executeToolCall(
     case "get_status":
     case "list_automations":
     case "list_schedules":
-      return { ok: true, line: runReadTool(call, ctx) };
+    case "get_water_status":
+      return { ok: true, line: await runReadTool(call, ctx) };
 
     case "create_schedule": {
       const start = parseHHMM(call.args.start);
@@ -563,6 +569,83 @@ async function executeToolCall(
       } catch (err) {
         return { ok: false, line: `Failed: ${err instanceof Error ? err.message : "couldn't delete the schedule"}` };
       }
+    }
+
+    case "update_schedule": {
+      const existing = ctx.snapshot.schedules.find((x) => x.id === call.args.id);
+      if (!existing) return { ok: false, line: `Failed: panel schedule ${call.args.id} no longer exists.` };
+      const start = call.args.start !== undefined ? parseHHMM(call.args.start) : existing.startTime;
+      const end = call.args.end !== undefined ? parseHHMM(call.args.end) : existing.endTime;
+      if (start === null || end === null) return { ok: false, line: "Failed: schedule times must be HH:MM." };
+      const days = call.args.days !== undefined && call.args.days.length > 0 ? call.args.days : existing.days;
+      try {
+        await getRuntime().adapter.upsertSchedule({
+          id: existing.id,
+          circuitId: existing.circuitId,
+          startTime: start,
+          endTime: end,
+          days,
+          scheduleType: existing.scheduleType,
+          heatSetpoint: existing.heatSetpoint,
+          heatSource: existing.heatSource,
+        });
+        audit({
+          userId: actionCtx.userId,
+          userName: actionCtx.userName,
+          source: "copilot",
+          action: "updateSchedule",
+          target: existing.circuitName,
+          oldValue: `${existing.startTime}–${existing.endTime} days ${existing.days.join(",")}`,
+          newValue: `${start}–${end} days ${days.join(",")}`,
+        });
+        return { ok: true, line: describeToolCall(call, ctx) };
+      } catch (err) {
+        return { ok: false, line: `Failed: ${err instanceof Error ? err.message : "couldn't update the schedule"}` };
+      }
+    }
+
+    case "create_scene": {
+      const actions: PoolAction[] = call.args.actions.flatMap((inner) => toolCallToActions(inner, ctx));
+      if (actions.length === 0) return { ok: false, line: "Failed: none of those steps are possible on this system." };
+      const maxPos = (db.prepare("SELECT COALESCE(MAX(position), 0) AS p FROM scenes").get() as { p: number }).p;
+      db.prepare(
+        "INSERT INTO scenes (name, icon, description, actions, guest_visible, position, created_by, created_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?)"
+      ).run(call.args.name, "sparkles", "Created by the copilot", JSON.stringify(actions), maxPos + 1, actionCtx.userId, now());
+      audit({
+        userId: actionCtx.userId,
+        userName: actionCtx.userName,
+        source: "copilot",
+        action: "createScene",
+        target: call.args.name,
+        newValue: `${actions.length} action${actions.length === 1 ? "" : "s"}`,
+      });
+      return { ok: true, line: `Scene “${call.args.name}” saved (${actions.length} step${actions.length === 1 ? "" : "s"}) — say “run ${call.args.name}” anytime.` };
+    }
+
+    case "delete_scene": {
+      const scene = ctx.scenes.find((x) => x.id === call.args.id);
+      db.prepare("DELETE FROM scenes WHERE id = ?").run(call.args.id);
+      audit({
+        userId: actionCtx.userId,
+        userName: actionCtx.userName,
+        source: "copilot",
+        action: "deleteScene",
+        target: scene?.name ?? `scene ${call.args.id}`,
+      });
+      return { ok: true, line: `Scene “${scene?.name ?? call.args.id}” deleted.` };
+    }
+
+    case "log_water_refill": {
+      recordRefill();
+      audit({
+        userId: actionCtx.userId,
+        userName: actionCtx.userName,
+        source: "copilot",
+        action: "waterRefill",
+        target: "water level",
+        newValue: "baseline reset",
+      });
+      return { ok: true, line: "Top-off recorded — the water-level estimate starts fresh from now." };
     }
 
     case "schedule_once": {

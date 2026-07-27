@@ -54,6 +54,9 @@ export function buildSystemPrompt(ctx: CopilotContext): string {
   const scenes = ctx.scenes.map((s) => `${s.id}:"${s.name}"`).join(" ") || "none";
   const themes = snap.lightThemes.map((t) => t.name).join(", ") || "none";
   const automations = ctx.automations.map((a) => `${a.id}:"${a.name}"${a.enabled ? "" : "(paused)"}`).join(" ") || "none";
+  const pumps = snap.pumps.map((p) => `${p.name} ${p.minSpeed}-${p.maxSpeed}rpm now ${p.rpm}`).join("; ") || "none";
+  const schedules =
+    snap.schedules.map((s) => `${s.id}:${s.circuitName}`).join(" ") || "none";
   const tools = TOOL_DEFS.map((d) => `${d.name} — ${d.description}`).join("\n");
 
   return [
@@ -64,10 +67,12 @@ export function buildSystemPrompt(ctx: CopilotContext): string {
     `circuits (id:name, * = light): ${circuits || "none"}`,
     `scenes: ${scenes} | light themes: ${themes}`,
     `automations (${ctx.automations.length}): ${automations}`,
+    `pumps: ${pumps} | panel schedules (id:circuit): ${schedules}`,
     ctx.pendingPlan ? "There IS a pending unconfirmed plan (cancel_pending applies to it)." : "No pending plan.",
     `TOOLS:\n${tools}`,
     'Rules: use numeric ids from the state above. Times are "HH:MM" 24h ("8" in the evening = "20:00", midnight = "00:00") or ISO. days: 0=Sun..6=Sat, [] = every day. Questions → get_status. "a bit warmer" = current setpoint +2.',
     "Timed requests: one-off (\"tonight at 10\") → schedule_once. Recurring ON/OFF window for ONE circuit (\"run the cleaner 9 to 11 every weekday\") → create_schedule (a panel schedule — keeps working even if this server is off). Recurring anything else (sunset, temperatures, multi-step, lights themes) → create_automation.",
+    "Also: pump speed → set_pump_speed. \"I added water / topped it off\" → log_water_refill. \"do we need water?\" → get_water_status. \"make/save a scene …\" → create_scene (saves, doesn't run).",
     'Examples: "turn on the waterfall" → {"tool_calls":[{"tool":"set_circuit","args":{"circuitId":<id of Waterfall>,"state":true}}]} · "warm the spa a bit" → {"tool_calls":[{"tool":"set_heat","args":{"body":"spa","setpoint":<current spa target + 2>}}]} · "everything off at 11pm" → {"tool_calls":[{"tool":"schedule_once","args":{"at":"23:00","actions":[{"tool":"all_off","args":{}}]}}]} · "lights blue at sunset every friday" → {"tool_calls":[{"tool":"create_automation","args":{"name":"Lights blue at sunset","trigger":{"type":"sun","event":"sunset","offsetMinutes":0,"days":[5]},"actions":[{"tool":"set_light_theme","args":{"theme":"Blue"}}]}}]}',
   ].join("\n");
 }

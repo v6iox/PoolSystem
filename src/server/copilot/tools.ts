@@ -31,14 +31,20 @@ export type ToolCall =
   | { tool: "set_circuit"; args: { circuitId: number; state: boolean } }
   | { tool: "set_heat"; args: { body: "pool" | "spa"; mode?: HeatModeInput; setpoint?: number } }
   | { tool: "run_scene"; args: { sceneId: number } }
-  | { tool: "set_light_theme"; args: { theme: string } }
-  | { tool: "set_chlorinator"; args: { outputPct: number } }
+  | { tool: "set_light_theme"; args: { theme: string; circuitId?: number } }
+  | { tool: "set_chlorinator"; args: { outputPct: number; spaOutputPct?: number } }
+  | { tool: "set_pump_speed"; args: { rpm: number } }
   | { tool: "super_chlorinate"; args: { on: boolean; hours: number } }
   | { tool: "all_off"; args: Record<string, never> }
   | { tool: "schedule_once"; args: { actions: ToolCall[]; at: string } }
   | { tool: "create_schedule"; args: { circuitId: number; start: string; end: string; days: number[] } }
   | { tool: "list_schedules"; args: Record<string, never> }
   | { tool: "delete_schedule"; args: { id: number } }
+  | { tool: "update_schedule"; args: { id: number; start?: string; end?: string; days?: number[] } }
+  | { tool: "create_scene"; args: { name: string; actions: ToolCall[] } }
+  | { tool: "delete_scene"; args: { id: number } }
+  | { tool: "log_water_refill"; args: Record<string, never> }
+  | { tool: "get_water_status"; args: Record<string, never> }
   | { tool: "create_automation"; args: { name: string; trigger: AutomationTrigger; actions: ToolCall[] } }
   | { tool: "list_automations"; args: Record<string, never> }
   | { tool: "pause_automation"; args: { id: number } }
@@ -129,11 +135,12 @@ export const EXECUTABLE_TOOLS: ReadonlySet<ToolName> = new Set([
   "run_scene",
   "set_light_theme",
   "set_chlorinator",
+  "set_pump_speed",
   "super_chlorinate",
   "all_off",
 ]);
 
-export const READ_ONLY_TOOLS: ReadonlySet<ToolName> = new Set(["get_status", "list_automations", "list_schedules"]);
+export const READ_ONLY_TOOLS: ReadonlySet<ToolName> = new Set(["get_status", "list_automations", "list_schedules", "get_water_status"]);
 
 export function isReadOnlyTool(tool: ToolName): boolean {
   return READ_ONLY_TOOLS.has(tool);
@@ -178,13 +185,13 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "set_light_theme",
-    description: "Set all pool lights to a named color/show theme (matched against available themes)",
-    argsSchema: objSchema({ theme: { type: "string" } }, ["theme"]),
+    description: 'Set a light color/show. Applies to all lights unless a specific light circuit is named via "circuit"',
+    argsSchema: objSchema({ theme: { type: "string" }, circuit: { type: "string" } }, ["theme"]),
   },
   {
     name: "set_chlorinator",
-    description: "Set chlorinator pool output percentage 0-100",
-    argsSchema: objSchema({ outputPct: { type: "number" } }, ["outputPct"]),
+    description: "Set chlorinator output percent (pool; optional spaOutputPct for the spa)",
+    argsSchema: objSchema({ outputPct: { type: "number" }, spaOutputPct: { type: "number" } }, ["outputPct"]),
   },
   {
     name: "super_chlorinate",
@@ -220,6 +227,14 @@ export const TOOL_DEFS: ToolDef[] = [
     ),
   },
   { name: "list_schedules", description: "List the panel schedules", argsSchema: objSchema({}) },
+  {
+    name: "update_schedule",
+    description: 'Change an existing panel schedule by id (any of start/end "HH:MM", days 0=Sun..6=Sat)',
+    argsSchema: objSchema(
+      { id: { type: "number" }, start: { type: "string" }, end: { type: "string" }, days: { type: "array", items: { type: "number" } } },
+      ["id"]
+    ),
+  },
   { name: "delete_schedule", description: "Delete a panel schedule by id", argsSchema: objSchema({ id: { type: "number" } }, ["id"]) },
   { name: "list_automations", description: "List the saved automations", argsSchema: objSchema({}) },
   { name: "pause_automation", description: "Pause an automation by id", argsSchema: objSchema({ id: { type: "number" } }, ["id"]) },
@@ -235,6 +250,26 @@ export const TOOL_DEFS: ToolDef[] = [
       ["readings"]
     ),
   },
+  {
+    name: "set_pump_speed",
+    description: "Set the variable-speed pump RPM",
+    argsSchema: objSchema({ rpm: { type: "number" } }, ["rpm"]),
+  },
+  {
+    name: "create_scene",
+    description: "Save a reusable one-tap scene (does NOT run it now): a name plus the actions it performs",
+    argsSchema: objSchema(
+      { name: { type: "string" }, actions: { type: "array", items: EXEC_CALL_SCHEMA } },
+      ["name", "actions"]
+    ),
+  },
+  { name: "delete_scene", description: "Delete a saved scene by id", argsSchema: objSchema({ id: { type: "number" } }, ["id"]) },
+  {
+    name: "log_water_refill",
+    description: 'Record that the user added water / topped off the pool (resets the water-level estimate)',
+    argsSchema: objSchema({}),
+  },
+  { name: "get_water_status", description: "Estimated water level: evaporation vs rain since the last top-off", argsSchema: objSchema({}) },
   { name: "cancel_pending", description: "Cancel the user's pending (unconfirmed) plan", argsSchema: objSchema({}) },
 ];
 
@@ -436,6 +471,17 @@ export function validateToolCall(raw: unknown, ctx: CopilotContext): ValidationR
         const available = ctx.snapshot.lightThemes.slice(0, 8).map((t) => t.name).join(", ");
         return fail(`I don't see a "${String(themeRef)}" light theme.${available ? ` Available: ${available}…` : ""}`);
       }
+      // Optional: target one specific light by name/id.
+      const circuitRef = typeof args.circuit === "string" ? args.circuit : num(args.circuitId);
+      if (circuitRef !== undefined && circuitRef !== "") {
+        const target = findCircuit(ctx, circuitRef);
+        if (!target) return fail(`I can't find a light called "${String(circuitRef)}".`);
+        if (!target.isLight) return fail(`"${target.name}" isn't a light.`);
+        if (isGuest && !ctx.guestVisibleCircuitIds.has(target.id)) {
+          return fail(`"${target.name}" isn't shared with guest accounts.`);
+        }
+        return { ok: true, call: { tool, args: { theme: theme.name, circuitId: target.id } } };
+      }
       const { groups, lights } = lightTargets(ctx);
       const targets = groups.length > 0 ? groups.length : lights.length;
       if (targets === 0) return fail(isGuest ? "No lights are shared with guest accounts." : "This system doesn't report any lights.");
@@ -450,7 +496,12 @@ export function validateToolCall(raw: unknown, ctx: CopilotContext): ValidationR
       if (!chlor) return fail("This system doesn't report a chlorinator.");
       const pct = num(args.outputPct);
       if (pct === undefined || pct < 0 || pct > 100) return fail("Chlorinator output needs to be 0–100%.");
-      return { ok: true, call: { tool, args: { outputPct: Math.round(pct) } } };
+      const spaPct = num(args.spaOutputPct);
+      if (spaPct !== undefined && (spaPct < 0 || spaPct > 100)) return fail("Spa chlorinator output needs to be 0–100%.");
+      return {
+        ok: true,
+        call: { tool, args: { outputPct: Math.round(pct), ...(spaPct !== undefined ? { spaOutputPct: Math.round(spaPct) } : {}) } },
+      };
     }
 
     case "super_chlorinate": {
@@ -525,6 +576,84 @@ export function validateToolCall(raw: unknown, ctx: CopilotContext): ValidationR
       return { ok: true, call: { tool, args: { id: schedule.id } } };
     }
 
+    case "set_pump_speed": {
+      if (isGuest) return fail(GUEST_DENIED);
+      const pump = ctx.snapshot.pumps[0];
+      if (!pump) return fail("This system doesn't report a controllable pump.");
+      const rpm = num(args.rpm);
+      if (rpm === undefined) return fail("What RPM should the pump run at?");
+      if (rpm < pump.minSpeed || rpm > pump.maxSpeed) {
+        return fail(`${pump.name} runs between ${pump.minSpeed} and ${pump.maxSpeed} RPM.`);
+      }
+      return { ok: true, call: { tool, args: { rpm: Math.round(rpm) } } };
+    }
+
+    case "update_schedule": {
+      if (isGuest) return fail(GUEST_DENIED);
+      const id = num(args.id);
+      const schedule = ctx.snapshot.schedules.find((x) => x.id === id);
+      if (!schedule) return fail(`There's no panel schedule with id ${String(args.id)} — ask me to list the schedules first.`);
+      const start = args.start === undefined ? undefined : parseHHMM(args.start);
+      const end = args.end === undefined ? undefined : parseHHMM(args.end);
+      if (start === null || end === null) return fail('Schedule times need to be like "09:00" (24h).');
+      const days = Array.isArray(args.days)
+        ? args.days.map((d) => num(d)).filter((d): d is number => d !== undefined && d >= 0 && d <= 6)
+        : undefined;
+      if (start === undefined && end === undefined && days === undefined) return fail("What should change about that schedule?");
+      return {
+        ok: true,
+        call: {
+          tool,
+          args: {
+            id: schedule.id,
+            ...(args.start !== undefined ? { start: String(args.start) } : {}),
+            ...(args.end !== undefined ? { end: String(args.end) } : {}),
+            ...(days !== undefined ? { days } : {}),
+          },
+        },
+      };
+    }
+
+    case "create_scene": {
+      if (isGuest) return fail(GUEST_DENIED);
+      const name = typeof args.name === "string" ? args.name.trim().slice(0, 60) : "";
+      if (!name) return fail("The scene needs a name.");
+      if (ctx.scenes.some((x) => x.name.toLowerCase() === name.toLowerCase())) {
+        return fail(`There's already a scene called "${name}".`);
+      }
+      if (!Array.isArray(args.actions) || args.actions.length === 0) return fail("The scene needs at least one action.");
+      if (args.actions.length > 10) return fail("That's too many steps for one scene (max 10).");
+      const inner: ToolCall[] = [];
+      for (const rawInner of args.actions) {
+        const v = validateToolCall(rawInner, ctx);
+        if (!v.ok) return v;
+        if (!EXECUTABLE_TOOLS.has(v.call.tool)) return fail("Scenes can only contain direct pool actions.");
+        inner.push(v.call);
+      }
+      return { ok: true, call: { tool, args: { name, actions: inner } } };
+    }
+
+    case "delete_scene": {
+      if (isGuest) return fail(GUEST_DENIED);
+      const ref = num(args.id) ?? (typeof args.name === "string" ? args.name : undefined);
+      const scene =
+        typeof ref === "number"
+          ? ctx.scenes.find((x) => x.id === ref)
+          : typeof ref === "string"
+            ? ctx.scenes.find((x) => x.name.toLowerCase() === ref.toLowerCase())
+            : undefined;
+      if (!scene) return fail(`I can't find that scene${typeof ref === "string" ? ` ("${ref}")` : ""}.`);
+      return { ok: true, call: { tool, args: { id: scene.id } } };
+    }
+
+    case "log_water_refill":
+      if (isGuest) return fail(GUEST_DENIED);
+      return { ok: true, call: { tool, args: {} } };
+
+    case "get_water_status":
+      if (isGuest) return fail(GUEST_DENIED);
+      return { ok: true, call: { tool, args: {} } };
+
     case "list_automations":
       return { ok: true, call: { tool, args: {} } };
 
@@ -585,6 +714,9 @@ export function toolCallToActions(call: ToolCall, ctx: CopilotContext): PoolActi
     case "set_light_theme": {
       const theme = resolveLightTheme(ctx, call.args.theme);
       if (!theme) return [];
+      if (call.args.circuitId !== undefined) {
+        return [{ type: "setLightTheme", circuitId: call.args.circuitId, theme: theme.val }];
+      }
       const { groups, lights } = lightTargets(ctx);
       if (groups.length > 0) return groups.map((g) => ({ type: "setLightGroupTheme", groupId: g.id, theme: theme.val }));
       return lights.map((l) => ({ type: "setLightTheme", circuitId: l.id, theme: theme.val }));
@@ -592,7 +724,14 @@ export function toolCallToActions(call: ToolCall, ctx: CopilotContext): PoolActi
     case "set_chlorinator": {
       const chlor = ctx.snapshot.chlorinators[0];
       if (!chlor) return [];
-      return [{ type: "setChlorinator", chlorId: chlor.id, poolSetpoint: call.args.outputPct }];
+      const action: Extract<PoolAction, { type: "setChlorinator" }> = { type: "setChlorinator", chlorId: chlor.id, poolSetpoint: call.args.outputPct };
+      if (call.args.spaOutputPct !== undefined) action.spaSetpoint = call.args.spaOutputPct;
+      return [action];
+    }
+    case "set_pump_speed": {
+      const pump = ctx.snapshot.pumps[0];
+      if (!pump) return [];
+      return [{ type: "setPumpSpeed", pumpId: pump.id, rpm: call.args.rpm }];
     }
     case "super_chlorinate": {
       const chlor = ctx.snapshot.chlorinators[0];
@@ -659,10 +798,20 @@ export function describeToolCall(call: ToolCall, ctx: CopilotContext): string {
     }
     case "set_light_theme": {
       const theme = resolveLightTheme(ctx, call.args.theme);
+      if (call.args.circuitId !== undefined) {
+        const target = allCircuits(ctx.snapshot).find((c) => c.id === call.args.circuitId);
+        return `${target?.name ?? `Light ${call.args.circuitId}`} → ${theme?.name ?? call.args.theme}`;
+      }
       return `All lights → ${theme?.name ?? call.args.theme}`;
     }
     case "set_chlorinator":
-      return `Chlorinator pool output → ${call.args.outputPct}%`;
+      return call.args.spaOutputPct !== undefined
+        ? `Chlorinator output → pool ${call.args.outputPct}% / spa ${call.args.spaOutputPct}%`
+        : `Chlorinator pool output → ${call.args.outputPct}%`;
+    case "set_pump_speed": {
+      const pump = ctx.snapshot.pumps[0];
+      return `${pump?.name ?? "Pump"} → ${call.args.rpm} RPM`;
+    }
     case "super_chlorinate":
       return call.args.on ? `Super-chlorinate for ${call.args.hours}h` : "Super-chlorinate OFF";
     case "all_off": {
@@ -688,6 +837,32 @@ export function describeToolCall(call: ToolCall, ctx: CopilotContext): string {
     }
     case "list_schedules":
       return "List panel schedules";
+    case "update_schedule": {
+      const schedule = ctx.snapshot.schedules.find((x) => x.id === call.args.id);
+      const changes: string[] = [];
+      if (call.args.start !== undefined) {
+        const m = parseHHMM(call.args.start);
+        changes.push(`start ${m !== null ? formatMinutes(m) : call.args.start}`);
+      }
+      if (call.args.end !== undefined) {
+        const m = parseHHMM(call.args.end);
+        changes.push(`end ${m !== null ? formatMinutes(m) : call.args.end}`);
+      }
+      if (call.args.days !== undefined) changes.push(formatDays(call.args.days.length > 0 ? call.args.days : [0, 1, 2, 3, 4, 5, 6]));
+      return `Update panel schedule — ${schedule?.circuitName ?? `id ${call.args.id}`}: ${changes.join(", ")}`;
+    }
+    case "create_scene": {
+      const inner = call.args.actions.map((a) => describeToolCall(a, ctx)).join("; ");
+      return `Save scene “${call.args.name}” — ${inner}`;
+    }
+    case "delete_scene": {
+      const scene = ctx.scenes.find((x) => x.id === call.args.id);
+      return `Delete scene “${scene?.name ?? call.args.id}”`;
+    }
+    case "log_water_refill":
+      return "Record a water top-off (resets the level estimate)";
+    case "get_water_status":
+      return "Check the water-level estimate";
     case "delete_schedule": {
       const schedule = ctx.snapshot.schedules.find((s) => s.id === call.args.id);
       return `Delete panel schedule — ${schedule ? `${schedule.circuitName} ${formatMinutes(schedule.startTime)}–${formatMinutes(schedule.endTime)}` : `id ${call.args.id}`}`;

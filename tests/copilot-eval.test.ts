@@ -309,3 +309,63 @@ describe("panel schedule tools (validateToolCall)", () => {
     expect(found.ok).toBe(true);
   });
 });
+
+describe("parity tools (validateToolCall)", () => {
+  it("pump speed is bounds-checked against the reported pump", () => {
+    const withPump: CopilotContext = {
+      ...ctx,
+      snapshot: {
+        ...ctx.snapshot,
+        pumps: [
+          {
+            id: 1,
+            name: "IntelliFlo VS",
+            type: "vs",
+            isRunning: true,
+            rpm: 2350,
+            watts: 600,
+            flow: 75,
+            minSpeed: 450,
+            maxSpeed: 3450,
+            circuits: [],
+          },
+        ],
+      },
+    };
+    const ok = validateToolCall({ tool: "set_pump_speed", args: { rpm: 2600 } }, withPump);
+    expect(ok.ok).toBe(true);
+    const low = validateToolCall({ tool: "set_pump_speed", args: { rpm: 100 } }, withPump);
+    expect(low.ok).toBe(false);
+    const noPump = validateToolCall({ tool: "set_pump_speed", args: { rpm: 2600 } }, ctx);
+    expect(noPump.ok).toBe(false);
+  });
+
+  it("light themes can target one named light", () => {
+    const v = validateToolCall({ tool: "set_light_theme", args: { theme: "blue", circuit: "spa light" } }, ctx);
+    expect(v.ok).toBe(true);
+    if (v.ok && v.call.tool === "set_light_theme") expect(v.call.args.circuitId).toBe(4);
+  });
+
+  it("scene creation validates nested actions and duplicate names", () => {
+    const dup = validateToolCall(
+      { tool: "create_scene", args: { name: "Spa Night", actions: [{ tool: "all_off", args: {} }] } },
+      ctx
+    );
+    expect(dup.ok).toBe(false);
+    const good = validateToolCall(
+      {
+        tool: "create_scene",
+        args: { name: "Movie Night", actions: [{ tool: "set_circuit", args: { circuit: "waterfall", state: false } }] },
+      },
+      ctx
+    );
+    expect(good.ok).toBe(true);
+  });
+
+  it("water tools are guest-gated", () => {
+    const guest = validateToolCall({ tool: "log_water_refill", args: {} }, { ...ctx, role: "guest" });
+    expect(guest.ok).toBe(false);
+    const owner = validateToolCall({ tool: "get_water_status", args: {} }, ctx);
+    expect(owner.ok).toBe(true);
+  });
+});
