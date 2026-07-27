@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { CopilotBackendError, buildSystemPrompt, type LlmPlan } from "./llm";
+import { CopilotBackendError, buildSystemPrompt, cleanReply, type LlmPlan } from "./llm";
 import { getOauthCredentials } from "./openai-oauth";
 import type { CopilotContext } from "./tools";
 
@@ -125,7 +125,7 @@ export async function parseWithCodex(text: string, ctx: CopilotContext, model: s
       throw new CopilotBackendError("ChatGPT returned malformed JSON");
     }
   }
-  const plan = parsed as { tool_calls?: unknown; needs_confirmation_note?: unknown };
+  const plan = parsed as { tool_calls?: unknown; needs_confirmation_note?: unknown; reply?: unknown };
   if (!Array.isArray(plan.tool_calls)) throw new CopilotBackendError("ChatGPT's reply was missing tool_calls");
   return {
     tool_calls: plan.tool_calls,
@@ -133,5 +133,6 @@ export async function parseWithCodex(text: string, ctx: CopilotContext, model: s
       typeof plan.needs_confirmation_note === "string" && plan.needs_confirmation_note.trim().length > 0
         ? plan.needs_confirmation_note.trim()
         : undefined,
+    reply: cleanReply(plan.reply),
   };
 }

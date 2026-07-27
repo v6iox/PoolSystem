@@ -386,6 +386,7 @@ export async function processMessage(
 
   let rawCalls: unknown[] = [];
   let note: string | undefined;
+  let chatReply: string | undefined;
   {
     try {
       // Dispatches to the configured brain: local Ollama / OpenAI API key /
@@ -393,6 +394,7 @@ export async function processMessage(
       const parsed = await parseWithProvider(trimmed, ctx);
       rawCalls = parsed.calls;
       note = parsed.note;
+      chatReply = parsed.reply;
     } catch (err) {
       const detail = err instanceof CopilotBackendError ? err.message : "copilot backend unreachable";
       const assistant = insertMessage(
@@ -405,7 +407,9 @@ export async function processMessage(
   }
 
   if (rawCalls.length === 0) {
-    return { messages: [userMsg, insertMessage(threadId, "assistant", note ?? UNKNOWN_REPLY)] };
+    // No action to take: a conversational LLM reply (greeting/small talk)
+    // beats the canned fallback. Facts/actions never come from chatReply.
+    return { messages: [userMsg, insertMessage(threadId, "assistant", chatReply ?? note ?? UNKNOWN_REPLY)] };
   }
 
   // Special intent: cancel the newest pending plan in this thread.

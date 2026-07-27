@@ -24,6 +24,18 @@ export class CopilotBackendError extends Error {
 export interface LlmPlan {
   tool_calls: unknown[];
   needs_confirmation_note?: string;
+  /** Model-written conversational reply — only honored when tool_calls is empty. */
+  reply?: string;
+}
+
+export function cleanReply(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const cleaned = value
+    .replace(/<think>[\s\S]*?<\/think>/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 400);
+  return cleaned.length > 0 ? cleaned : undefined;
 }
 
 /** Compact live-state summary — kept well under ~600 tokens. */
@@ -45,7 +57,8 @@ export function buildSystemPrompt(ctx: CopilotContext): string {
   const tools = TOOL_DEFS.map((d) => `${d.name} — ${d.description}`).join("\n");
 
   return [
-    "You translate pool-owner requests into STRUCTURED TOOL CALLS ONLY. You never chat. Reply with JSON matching the schema: {\"tool_calls\":[{\"tool\":\"…\",\"args\":{…}}], \"needs_confirmation_note\":\"optional caveat\"}. If the request is unclear or not pool-related, return {\"tool_calls\":[]}.",
+    "You are Moonpool's pool copilot. You translate pool-owner requests into STRUCTURED TOOL CALLS. Reply with JSON matching the schema: {\"tool_calls\":[{\"tool\":\"…\",\"args\":{…}}], \"needs_confirmation_note\":\"optional caveat\", \"reply\":\"optional\"}.",
+    "When the message is a greeting, thanks, or small talk with nothing to do: return {\"tool_calls\":[], \"reply\":\"…\"} — a warm, short (1–2 sentence) reply in a relaxed poolside voice. Never put temperatures, readings or other facts in reply — those come from tools. If the request is unclear or unrelated to anything you can do, return {\"tool_calls\":[]} with a reply saying what you CAN do.",
     `LIVE STATE — bodies: ${bodies || "none"}. air ${snap.airTemp !== null ? Math.round(snap.airTemp) + deg : "?"}.`,
     `circuits (id:name, * = light): ${circuits || "none"}`,
     `scenes: ${scenes} | light themes: ${themes}`,
@@ -107,7 +120,7 @@ export async function parseWithLlm(text: string, ctx: CopilotContext, overrides:
     } catch {
       throw new CopilotBackendError("LLM returned malformed JSON");
     }
-    const plan = parsed as { tool_calls?: unknown; needs_confirmation_note?: unknown };
+    const plan = parsed as { tool_calls?: unknown; needs_confirmation_note?: unknown; reply?: unknown };
     if (!Array.isArray(plan.tool_calls)) throw new CopilotBackendError("LLM response was missing tool_calls");
     return {
       tool_calls: plan.tool_calls,
@@ -115,6 +128,7 @@ export async function parseWithLlm(text: string, ctx: CopilotContext, overrides:
         typeof plan.needs_confirmation_note === "string" && plan.needs_confirmation_note.trim().length > 0
           ? plan.needs_confirmation_note.trim()
           : undefined,
+      reply: cleanReply(plan.reply),
     };
   } catch (err) {
     if (err instanceof CopilotBackendError) throw err;

@@ -47,6 +47,8 @@ export function defaultModelFor(provider: CopilotProviderKind): string {
 export interface ParsedUtterance {
   calls: unknown[];
   note?: string;
+  /** Conversational reply for no-action turns (LLM providers only). */
+  reply?: string;
 }
 
 /** Route an utterance to whichever brain is configured. */
@@ -61,12 +63,12 @@ export async function parseWithProvider(text: string, ctx: CopilotContext): Prom
       model,
       timeoutMs: 20_000,
     });
-    return { calls: plan.tool_calls, note: plan.needs_confirmation_note };
+    return { calls: plan.tool_calls, note: plan.needs_confirmation_note, reply: plan.reply };
   }
 
   if (config.provider === "chatgpt-oauth" && getOauthStatus().connected) {
     const plan = await parseWithCodex(text, ctx, model);
-    return { calls: plan.tool_calls, note: plan.needs_confirmation_note };
+    return { calls: plan.tool_calls, note: plan.needs_confirmation_note, reply: plan.reply };
   }
 
   // Default: env-configured backend; deterministic parser when simulating.
@@ -79,5 +81,5 @@ export async function parseWithProvider(text: string, ctx: CopilotContext): Prom
   }
   // The Settings model override applies to the local brain too.
   const plan = await parseWithLlm(text, ctx, config.model ? { model: config.model } : {});
-  return { calls: plan.tool_calls, note: plan.needs_confirmation_note };
+  return { calls: plan.tool_calls, note: plan.needs_confirmation_note, reply: plan.reply };
 }
