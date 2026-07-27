@@ -351,11 +351,24 @@ docker compose exec web node -e "require('better-sqlite3')('/data/moonpool.db').
   && docker cp $(docker compose ps -q web):/data/backup.db ./moonpool-backup-$(date +%F).db
 ```
 
-Update Moonpool:
+### Updates
+
+Moonpool updates itself from GitHub releases. **Settings → System → Software
+updates** (Owner) has:
+
+- your current version vs. the latest release, with a **Check for updates**
+  button and a one-tap **Update now** (the updater sidecar checks out the
+  release, rebuilds the web container, and Moonpool restarts itself — the
+  page reconnects automatically),
+- an **Update automatically** toggle with a time picker (default: a nightly
+  check at midnight). Auto off? You still get a push notification when a new
+  release exists.
+
+Manual paths always work too:
 
 ```bash
-git pull
-docker compose up -d --build
+~/moonpool/install.sh --update        # or:
+cd ~/moonpool && git pull && docker compose up -d --build
 ```
 
 The database schema migrates itself on boot. History samples are pruned at 90

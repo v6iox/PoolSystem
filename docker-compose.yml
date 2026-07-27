@@ -49,6 +49,8 @@ services:
       - TEMPEST_UDP=${TEMPEST_UDP:-true}
       - TEMPEST_TOKEN=${TEMPEST_TOKEN:-}
       - TEMPEST_STATION_ID=${TEMPEST_STATION_ID:-}
+      - UPDATER_URL=http://updater:9888
+      - MOONPOOL_REPO_SLUG=${MOONPOOL_REPO_SLUG:-v6iox/poolsystem}
       - TZ=${TZ:-America/Denver}
 
   # Local LLM for the Pool Copilot. First run: docker compose exec ollama ollama pull qwen3:1.7b
@@ -62,6 +64,23 @@ services:
       - OLLAMA_CONTEXT_LENGTH=2048
     expose:
       - "11434"
+
+  # Auto-update sidecar: the only container with the Docker socket. The web
+  # app asks it (internal network, bearer token) to check out a release tag
+  # and rebuild `web` — nightly if enabled in Settings, or on demand.
+  updater:
+    build:
+      context: .
+      dockerfile: Dockerfile.updater
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/workspace
+    environment:
+      - UPDATER_TOKEN=${AUTH_SECRET:?set AUTH_SECRET in .env}
+      - TZ=${TZ:-America/Denver}
+    expose:
+      - "9888"
 
   # Optional: Cloudflare Tunnel for remote access from anywhere — outbound-only,
   # no port forwarding, no VPN client on the phone. See README "Remote access".

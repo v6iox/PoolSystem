@@ -3,6 +3,10 @@ name: Release
 # Pushing a tag like v1.0.0 creates the GitHub Release with the installer
 # attached, so the docs' one-liner always works:
 #   curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | bash
+#
+# NOTE: bump "version" in package.json to match the tag before releasing —
+# the in-app auto-updater compares package.json against the latest release
+# tag to decide whether an update exists.
 
 on:
   push:
