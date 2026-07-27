@@ -60,6 +60,21 @@ Moonpool's session- and role-checked API, and every state change is audited.
 | --- | --- |
 | ![Ask bar](docs/images/ask-bar.png) | ![Lights](docs/images/lights.png) |
 
+## Install
+
+One line on your Pi (or any Linux box with Docker — the installer offers to
+install Docker for you):
+
+```bash
+curl -fsSL https://github.com/v6iox/poolsystem/releases/latest/download/install.sh | bash
+```
+
+An interactive, arrow-key installer walks you through everything: real pool
+vs. demo simulator, RS-485 adapter auto-detection, timezone & location, the
+copilot's AI brain, optional remote access — then builds the stack and hands
+you the URL. Re-run it any time to reconfigure; `install.sh --update`
+upgrades in place.
+
 ## Try it in 60 seconds (no hardware)
 
 ```bash

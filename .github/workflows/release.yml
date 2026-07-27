@@ -1,0 +1,31 @@
+name: Release
+
+# Pushing a tag like v1.0.0 creates the GitHub Release with the installer
+# attached, so the docs' one-liner always works:
+#   curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | bash
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Moonpool ${{ github.ref_name }}
+          body_path: .github/RELEASE_NOTES.md
+          files: install.sh

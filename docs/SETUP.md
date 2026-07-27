@@ -119,6 +119,21 @@ If yours enumerates differently (e.g. `/dev/ttyUSB1`), note it — you'll adjust
 
 ## 5. Install Moonpool
 
+### The easy way — interactive installer
+
+```bash
+curl -fsSL https://github.com/v6iox/poolsystem/releases/latest/download/install.sh | bash
+```
+
+Arrow-key menus walk you through: real pool vs. demo, picking your RS-485
+adapter from the devices it detects, timezone/location, the copilot brain,
+and optional remote access. It generates `.env`, builds the Docker stack,
+waits for Moonpool to come up, and prints your URL. Re-run any time to
+reconfigure; `~/moonpool/install.sh --update` upgrades later. If that's all
+you need, skip straight to [First bring-up](#6-first-bring-up).
+
+### The manual way
+
 ```bash
 git clone <this repo> moonpool && cd moonpool
 cp .env.example .env
