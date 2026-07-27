@@ -85,7 +85,7 @@ function stripRecurrence(t: string): string {
 
 /* ── sub-parsers ────────────────────────────────────────────────────────── */
 
-function isGreeting(t: string): boolean {
+export function isGreeting(t: string): boolean {
   return /^(hi|hey|hello|yo|howdy|sup|good (morning|afternoon|evening|night)|thanks|thank you)( there| copilot| moonpool)?\s*\??$/.test(
     t
   );

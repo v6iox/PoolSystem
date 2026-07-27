@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseUtterance } from "@/server/copilot/mock-parser";
 import { parseWithLlm } from "@/server/copilot/llm";
+import { validateToolCall } from "@/server/copilot/tools";
 import type { CopilotContext, ToolCall } from "@/server/copilot/tools";
 import { EMPTY_SNAPSHOT, type CircuitState, type PoolStateSnapshot } from "@/types/pool";
 
@@ -249,4 +250,122 @@ describe.skipIf(!live)("copilot live LLM eval", () => {
       30_000
     );
   }
+});
+
+describe("panel schedule tools (validateToolCall)", () => {
+  it("resolves circuit names and normalizes create_schedule", () => {
+    const v = validateToolCall(
+      { tool: "create_schedule", args: { circuit: "cleaner", start: "09:00", end: "11:00", days: [1, 2, 3, 4, 5] } },
+      ctx
+    );
+    expect(v.ok).toBe(true);
+    if (v.ok) {
+      expect(v.call).toEqual({
+        tool: "create_schedule",
+        args: { circuitId: 5, start: "09:00", end: "11:00", days: [1, 2, 3, 4, 5] },
+      });
+    }
+  });
+
+  it("rejects malformed times", () => {
+    const v = validateToolCall({ tool: "create_schedule", args: { circuitId: 5, start: "9pm", end: "11:00", days: [] } }, ctx);
+    expect(v.ok).toBe(false);
+  });
+
+  it("denies guests", () => {
+    const v = validateToolCall(
+      { tool: "create_schedule", args: { circuitId: 5, start: "09:00", end: "11:00", days: [] } },
+      { ...ctx, role: "guest" }
+    );
+    expect(v.ok).toBe(false);
+  });
+
+  it("delete requires a schedule that exists", () => {
+    const missing = validateToolCall({ tool: "delete_schedule", args: { id: 99 } }, ctx);
+    expect(missing.ok).toBe(false);
+    const withSchedule: CopilotContext = {
+      ...ctx,
+      snapshot: {
+        ...ctx.snapshot,
+        schedules: [
+          {
+            id: 7,
+            circuitId: 5,
+            circuitName: "Cleaner",
+            startTime: 540,
+            endTime: 660,
+            days: [1],
+            scheduleType: "repeat",
+            isEggTimer: false,
+            heatSetpoint: null,
+            heatSource: null,
+            disabled: false,
+            isActive: false,
+          },
+        ],
+      },
+    };
+    const found = validateToolCall({ tool: "delete_schedule", args: { id: 7 } }, withSchedule);
+    expect(found.ok).toBe(true);
+  });
+});
+
+describe("parity tools (validateToolCall)", () => {
+  it("pump speed is bounds-checked against the reported pump", () => {
+    const withPump: CopilotContext = {
+      ...ctx,
+      snapshot: {
+        ...ctx.snapshot,
+        pumps: [
+          {
+            id: 1,
+            name: "IntelliFlo VS",
+            type: "vs",
+            isRunning: true,
+            rpm: 2350,
+            watts: 600,
+            flow: 75,
+            minSpeed: 450,
+            maxSpeed: 3450,
+            circuits: [],
+          },
+        ],
+      },
+    };
+    const ok = validateToolCall({ tool: "set_pump_speed", args: { rpm: 2600 } }, withPump);
+    expect(ok.ok).toBe(true);
+    const low = validateToolCall({ tool: "set_pump_speed", args: { rpm: 100 } }, withPump);
+    expect(low.ok).toBe(false);
+    const noPump = validateToolCall({ tool: "set_pump_speed", args: { rpm: 2600 } }, ctx);
+    expect(noPump.ok).toBe(false);
+  });
+
+  it("light themes can target one named light", () => {
+    const v = validateToolCall({ tool: "set_light_theme", args: { theme: "blue", circuit: "spa light" } }, ctx);
+    expect(v.ok).toBe(true);
+    if (v.ok && v.call.tool === "set_light_theme") expect(v.call.args.circuitId).toBe(4);
+  });
+
+  it("scene creation validates nested actions and duplicate names", () => {
+    const dup = validateToolCall(
+      { tool: "create_scene", args: { name: "Spa Night", actions: [{ tool: "all_off", args: {} }] } },
+      ctx
+    );
+    expect(dup.ok).toBe(false);
+    const good = validateToolCall(
+      {
+        tool: "create_scene",
+        args: { name: "Movie Night", actions: [{ tool: "set_circuit", args: { circuit: "waterfall", state: false } }] },
+      },
+      ctx
+    );
+    expect(good.ok).toBe(true);
+  });
+
+  it("water tools are guest-gated", () => {
+    const guest = validateToolCall({ tool: "log_water_refill", args: {} }, { ...ctx, role: "guest" });
+    expect(guest.ok).toBe(false);
+    const owner = validateToolCall({ tool: "get_water_status", args: {} }, ctx);
+    expect(owner.ok).toBe(true);
+  });
 });
