@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowRight, Check, ChevronRight, CloudRain, MessageCircle, Sparkles, TriangleAlert, X } from "lucide-react";
 import Link from "next/link";
@@ -40,6 +41,7 @@ function AiMark({ active }: { active: boolean }): React.JSX.Element {
 
 export function AskBar({ className }: { className?: string }): React.JSX.Element {
   const { backendConnected } = usePool();
+  const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [text, setText] = useState("");
@@ -100,13 +102,19 @@ export function AskBar({ className }: { className?: string }): React.JSX.Element
         );
         // The plan message carries executed/cancelled state + result rows.
         setReply(res.message);
+        if (kind === "confirm") {
+          // Plans can create one-shots/automations/scenes — refresh the lists
+          // so the Schedules page shows them right away.
+          void queryClient.invalidateQueries({ queryKey: ["automations"] });
+          void queryClient.invalidateQueries({ queryKey: ["scenes"] });
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Couldn't do that");
       } finally {
         setPlanBusy(false);
       }
     },
-    [reply, planBusy]
+    [reply, planBusy, queryClient]
   );
 
   const open = asked !== null;

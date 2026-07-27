@@ -1,6 +1,7 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -17,6 +18,7 @@ import {
   FlaskConical,
   Moon,
   ShieldCheck,
+  SlidersHorizontal,
   Snowflake,
   Sun,
   Timer,
@@ -24,22 +26,29 @@ import {
   WifiOff,
 } from "lucide-react";
 import { usePool, patchCircuit } from "@/lib/client/pool-state";
-import { apiGet } from "@/lib/client/api";
+import { apiGet, apiSend } from "@/lib/client/api";
+import { toast } from "@/stores/toast";
 import { Panel } from "@/components/ui/panel";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { CircuitIcon } from "@/lib/icons";
 import { cn, formatMinutes, formatRelative, DAY_LABELS } from "@/lib/utils";
+import type { CircuitState } from "@/types/pool";
 import type { WeatherData } from "@/types/weather";
 
 export function WidgetFrame({
   title,
   href,
+  action,
   children,
   className,
 }: {
   title: string;
   href?: string;
+  /** Extra header control (e.g. a customize button), rendered before the link. */
+  action?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }): React.JSX.Element {
@@ -47,11 +56,14 @@ export function WidgetFrame({
     <Panel className={cn("flex h-full flex-col p-4", className)}>
       <div className="mb-3 flex items-center justify-between">
         <p className="text-[11px] font-semibold tracking-[0.14em] text-ink-faint uppercase">{title}</p>
-        {href ? (
-          <Link href={href} className="rounded-md p-1 text-ink-faint transition hover:text-accent">
-            <ArrowRight size={14} />
-          </Link>
-        ) : null}
+        <span className="flex items-center gap-0.5">
+          {action}
+          {href ? (
+            <Link href={href} className="rounded-md p-1 text-ink-faint transition hover:text-accent">
+              <ArrowRight size={14} />
+            </Link>
+          ) : null}
+        </span>
       </div>
       <div className="min-h-0 flex-1">{children}</div>
     </Panel>
@@ -60,29 +72,66 @@ export function WidgetFrame({
 
 /* ── Quick toggles ─────────────────────────────────────────────── */
 
+const QUICK_MAX = 8;
+
+interface QuickPrefs {
+  prefs: { quickControls?: number[] | null } & Record<string, unknown>;
+}
+
 export function QuickTogglesWidget(): React.JSX.Element {
   const { snapshot, sendAction, backendConnected, user } = usePool();
-  const items = [...snapshot.circuits, ...snapshot.features]
-    .filter((c) => c.showInFeatures && c.type !== "pool" && c.type !== "spa")
-    .slice(0, 6);
-  const bodies = snapshot.bodies;
+  const queryClient = useQueryClient();
+  const [editOpen, setEditOpen] = useState(false);
+  const prefsQuery = useQuery({
+    queryKey: ["user-prefs"],
+    queryFn: () => apiGet<QuickPrefs>("/api/settings/prefs"),
+  });
+
+  const all = [...snapshot.circuits, ...snapshot.features];
+  // Default (no customization yet): bodies first, then the first few features.
+  const defaults = [
+    ...snapshot.bodies.map((b) => b.circuitId),
+    ...all
+      .filter((c) => c.showInFeatures && c.type !== "pool" && c.type !== "spa")
+      .slice(0, 4)
+      .map((c) => c.id),
+  ];
+  const saved = prefsQuery.data?.prefs.quickControls;
+  const chosen = (Array.isArray(saved) ? saved : defaults)
+    .filter((id, i, arr) => arr.indexOf(id) === i && all.some((c) => c.id === id))
+    .slice(0, QUICK_MAX);
+  const rows = chosen
+    .map((id) => all.find((c) => c.id === id))
+    .filter((c): c is CircuitState => c !== undefined);
+
+  const save = (ids: number[] | null): void => {
+    const previous = prefsQuery.data;
+    queryClient.setQueryData<QuickPrefs>(["user-prefs"], (old) => ({
+      prefs: { ...(old?.prefs ?? {}), quickControls: ids },
+    }));
+    void apiSend<QuickPrefs>("PUT", "/api/settings/prefs", { quickControls: ids }).catch((err: unknown) => {
+      queryClient.setQueryData(["user-prefs"], previous);
+      toast("error", "Couldn't save quick controls", err instanceof Error ? err.message : undefined);
+    });
+  };
 
   return (
-    <WidgetFrame title="Quick controls" href="/circuits">
+    <WidgetFrame
+      title="Quick controls"
+      href="/circuits"
+      action={
+        <button
+          type="button"
+          onClick={() => setEditOpen(true)}
+          className="rounded-md p-1 text-ink-faint transition hover:text-accent"
+          aria-label="Customize quick controls"
+        >
+          <SlidersHorizontal size={14} />
+        </button>
+      }
+    >
       <div className="space-y-1.5">
-        {bodies.map((b) => (
-          <ToggleRow
-            key={`body-${b.id}`}
-            name={b.name}
-            icon={<CircuitIcon type={b.kind} isLight={false} size={17} className="text-accent" />}
-            on={b.isOn}
-            disabled={!backendConnected}
-            onToggle={(on) =>
-              void sendAction({ type: "setCircuit", circuitId: b.circuitId, state: on }, patchCircuit(b.circuitId, on))
-            }
-          />
-        ))}
-        {items.slice(0, 4).map((c) => (
+        {rows.map((c) => (
           <ToggleRow
             key={c.id}
             name={c.name}
@@ -92,10 +141,57 @@ export function QuickTogglesWidget(): React.JSX.Element {
             onToggle={(on) => void sendAction({ type: "setCircuit", circuitId: c.id, state: on }, patchCircuit(c.id, on))}
           />
         ))}
-        {items.length === 0 && bodies.length === 0 && (
-          <p className="text-sm text-ink-faint">{user.role === "guest" ? "Nothing shared with guests yet." : "No circuits reported."}</p>
+        {rows.length === 0 && (
+          <p className="text-sm text-ink-faint">
+            {all.length === 0
+              ? user.role === "guest"
+                ? "Nothing shared with guests yet."
+                : "No circuits reported."
+              : "No quick controls picked — tap the sliders icon to choose some."}
+          </p>
         )}
       </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent
+          title="Customize quick controls"
+          description={`Pick up to ${QUICK_MAX} controls to keep on the dashboard. Changes save instantly.`}
+        >
+          <div className="space-y-1">
+            {all.map((c) => {
+              const checked = chosen.includes(c.id);
+              const atCap = !checked && chosen.length >= QUICK_MAX;
+              return (
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between gap-2 rounded-xl px-2 py-1.5 transition-colors hover:bg-accent-soft/40"
+                >
+                  <span className="flex min-w-0 items-center gap-2.5 text-sm text-ink">
+                    <CircuitIcon type={c.type} isLight={c.isLight} size={17} className="text-ink-faint" />
+                    <span className="truncate">{c.name}</span>
+                  </span>
+                  <Switch
+                    checked={checked}
+                    disabled={atCap}
+                    onCheckedChange={(on) => save(on ? [...chosen, c.id] : chosen.filter((x) => x !== c.id))}
+                    aria-label={`${checked ? "Remove" : "Add"} ${c.name}`}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-4 flex items-center justify-between">
+            <Button variant="ghost" size="sm" onClick={() => save(null)}>
+              Reset to default
+            </Button>
+            <DialogClose asChild>
+              <Button variant="glass" size="sm">
+                Done
+              </Button>
+            </DialogClose>
+          </div>
+        </DialogContent>
+      </Dialog>
     </WidgetFrame>
   );
 }

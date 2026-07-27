@@ -14,6 +14,7 @@ export type AlertKind =
   | "saltLow"
   | "chemistryOutOfRange"
   | "spaAtTemp"
+  | "heaterStall"
   | "njspcOffline"
   | "waterLow"
   | "lightning";
@@ -24,6 +25,7 @@ export const ALERT_LABELS: Record<AlertKind, string> = {
   saltLow: "Salt low",
   chemistryOutOfRange: "Chemistry out of range",
   spaAtTemp: "Spa reached temperature",
+  heaterStall: "Heater not actually heating",
   njspcOffline: "Pool controller offline",
   waterLow: "Water level low (estimated)",
   lightning: "Lightning detected nearby",
