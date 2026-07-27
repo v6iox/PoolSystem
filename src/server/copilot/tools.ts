@@ -285,19 +285,27 @@ export const TOOL_DEFS: ToolDef[] = [
   { name: "cancel_pending", description: "Cancel the user's pending (unconfirmed) plan", argsSchema: objSchema({}) },
 ];
 
-/** Response contract forced onto the LLM so malformed output is impossible. */
+/**
+ * Response contract sent to LLM backends. Deliberately COARSE: tool names are
+ * a flat enum and args a free object. A per-tool anyOf of 24 strict schemas
+ * compiles into a pathological sampling grammar on llama.cpp/Ollama (every
+ * branch stays alive through nested objects — multi-call plans slow to
+ * seconds per token and time out). Exact arg shapes are described in the
+ * prompt (see toolSignature) and enforced by validateToolCall server-side,
+ * which was always the real gate.
+ */
 export const RESPONSE_JSON_SCHEMA: JsonSchema = {
   type: "object",
   properties: {
     tool_calls: {
       type: "array",
       items: {
-        anyOf: TOOL_DEFS.map((def) => ({
-          type: "object",
-          properties: { tool: { const: def.name }, args: def.argsSchema },
-          required: ["tool", "args"],
-          additionalProperties: false,
-        })),
+        type: "object",
+        properties: {
+          tool: { type: "string", enum: TOOL_DEFS.map((d) => d.name) },
+          args: { type: "object" },
+        },
+        required: ["tool", "args"],
       },
     },
     needs_confirmation_note: { type: "string" },
@@ -306,8 +314,23 @@ export const RESPONSE_JSON_SCHEMA: JsonSchema = {
     reply: { type: "string" },
   },
   required: ["tool_calls"],
-  additionalProperties: false,
 };
+
+/** Compact "name(arg:type, arg?:type)" signature for the system prompt. */
+export function toolSignature(def: ToolDef): string {
+  const props = (def.argsSchema.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const required = new Set((def.argsSchema.required as string[] | undefined) ?? []);
+  const parts = Object.entries(props).map(([name, schema]) => {
+    let label: string;
+    if (Array.isArray(schema.enum)) label = schema.enum.map(String).join("|");
+    else if (schema.type === "array") {
+      const items = schema.items as Record<string, unknown> | undefined;
+      label = items?.type === "number" ? "number[]" : items && "properties" in items ? "call[]" : "array";
+    } else label = String(schema.type ?? "any");
+    return `${name}${required.has(name) ? "" : "?"}:${label}`;
+  });
+  return `${def.name}(${parts.join(", ")})`;
+}
 
 /* ── name → id resolution against the live snapshot ─────────────────────── */
 

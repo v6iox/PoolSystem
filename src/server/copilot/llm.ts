@@ -1,15 +1,16 @@
 import type { CopilotContext } from "./tools";
-import { RESPONSE_JSON_SCHEMA, TOOL_DEFS, allCircuits } from "./tools";
+import { RESPONSE_JSON_SCHEMA, TOOL_DEFS, allCircuits, toolSignature } from "./tools";
 
 /**
- * OpenAI-compatible chat client (Ollama by default) used only to translate
- * natural language into structured tool calls. Plain fetch, no SDK. The
- * response_format json_schema makes malformed output impossible — the model
- * can only return {tool_calls: [...], needs_confirmation_note?}. It never
- * writes the reply the user sees; templates do that from executed results.
+ * OpenAI-compatible chat client (Ollama by default) that translates natural
+ * language into structured tool calls. Plain fetch, no SDK. The coarse
+ * response_format json_schema guarantees parseable {tool_calls, reply?} JSON;
+ * validateToolCall enforces the real per-tool contracts server-side. Facts
+ * and action results always come from templates, never the model.
  *
  * Env: COPILOT_BASE_URL (default http://localhost:11434/v1),
- *      COPILOT_MODEL (default "qwen3:1.7b"), COPILOT_API_KEY (optional).
+ *      COPILOT_MODEL (default "qwen3:1.7b"), COPILOT_API_KEY (optional),
+ *      COPILOT_TIMEOUT_MS (default 60000).
  */
 
 // Local models can be slow: a cold Ollama request reloads the model from
@@ -65,7 +66,9 @@ export function buildSystemPrompt(ctx: CopilotContext): string {
   const pumps = snap.pumps.map((p) => `${p.name} ${p.minSpeed}-${p.maxSpeed}rpm now ${p.rpm}`).join("; ") || "none";
   const schedules =
     snap.schedules.map((s) => `${s.id}:${s.circuitName}`).join(" ") || "none";
-  const tools = TOOL_DEFS.map((d) => `${d.name} — ${d.description}`).join("\n");
+  // Signatures carry the arg shapes since the response schema no longer does
+  // (a strict per-tool schema melts Ollama's grammar sampler — see tools.ts).
+  const tools = TOOL_DEFS.map((d) => `${toolSignature(d)} — ${d.description}`).join("\n");
 
   return [
     "You are Moonpool's pool copilot. You translate pool-owner requests into STRUCTURED TOOL CALLS. Reply with JSON matching the schema: {\"tool_calls\":[{\"tool\":\"…\",\"args\":{…}}], \"needs_confirmation_note\":\"optional caveat\", \"reply\":\"optional\"}.",
@@ -117,9 +120,11 @@ export async function parseWithLlm(text: string, ctx: CopilotContext, overrides:
           // calls don't benefit and a 1.7B model can think past any timeout.
           { role: "user", content: /qwen3/i.test(model) ? `${text} /no_think` : text },
         ],
+        // strict:false — OpenAI's strict mode rejects optional properties, and
+        // Ollama's grammar enforcement only needs the coarse shape.
         response_format: {
           type: "json_schema",
-          json_schema: { name: "copilot_plan", strict: true, schema: RESPONSE_JSON_SCHEMA },
+          json_schema: { name: "copilot_plan", strict: false, schema: RESPONSE_JSON_SCHEMA },
         },
       }),
       signal: controller.signal,
