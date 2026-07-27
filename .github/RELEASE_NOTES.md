@@ -1,4 +1,14 @@
-## Moonpool v1.0.0 — first public release 🌙
+## Moonpool v1.0.2 🌙
+
+**New since v1.0.0: built-in auto-updates.** Settings → System → Software
+updates shows your version vs. the latest release, with a **Check for
+updates** button and one-tap **Update now**; enable **Update automatically**
+and Moonpool checks nightly (time configurable, midnight by default) and
+installs new releases on its own — applied safely by a token-gated updater
+sidecar, the only container with Docker access. Everything below describes
+the full app.
+
+---
 
 Self-hosted pool control for Pentair EasyTouch/IntelliTouch panels, built on
 [nodejs-poolController](https://github.com/tagyoureit/nodejs-poolController).

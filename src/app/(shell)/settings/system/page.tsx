@@ -24,6 +24,8 @@ import {
   type PillTone,
 } from "@/components/settings/section";
 import { DetectedEquipment } from "@/components/settings/detected-equipment";
+import { UpdatesSection } from "@/components/settings/updates-section";
+import { roleAtLeast } from "@/types/auth";
 import { formatRelative } from "@/lib/utils";
 
 /** Read-only system status: connection, panel state, equipment identity, versions. */
@@ -35,7 +37,7 @@ function ValueText({ children }: { children: React.ReactNode }): React.JSX.Eleme
 }
 
 export default function SystemSettingsPage(): React.JSX.Element {
-  const { snapshot, hasLoaded, backendConnected, connection } = usePool();
+  const { snapshot, hasLoaded, backendConnected, connection, user } = usePool();
 
   const panelTone: PillTone = snapshot.panelMode === "auto" ? "ok" : snapshot.panelMode === "unknown" ? "neutral" : "warn";
   const equipment = snapshot.equipment;
@@ -94,6 +96,12 @@ export default function SystemSettingsPage(): React.JSX.Element {
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.03 }}>
               <DetectedEquipment />
             </motion.div>
+
+            {roleAtLeast(user.role, "owner") && (
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }}>
+                <UpdatesSection />
+              </motion.div>
+            )}
 
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
               <SettingsSection icon={<Cpu size={13} />} title="Equipment">
