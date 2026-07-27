@@ -175,6 +175,24 @@ const CASES: EvalCase[] = [
     expected: [{ tool: "schedule_once", args: { at: "06:00", actions: [{ tool: "set_circuit", args: { circuitId: 5, state: true } }] } }],
   },
 
+  // relative scheduling ("in 2 hours…")
+  {
+    text: "in 2 hours heat the hot tub",
+    expected: [
+      { tool: "schedule_once", args: { inMinutes: 120, actions: [{ tool: "set_heat", args: { body: "spa", mode: "heater" } }] } },
+    ],
+  },
+  {
+    text: "turn off the waterfall in 45 minutes",
+    expected: [
+      { tool: "schedule_once", args: { inMinutes: 45, actions: [{ tool: "set_circuit", args: { circuitId: 2, state: false } }] } },
+    ],
+  },
+  {
+    text: "everything off in an hour",
+    expected: [{ tool: "schedule_once", args: { inMinutes: 60, actions: [{ tool: "all_off" }] } }],
+  },
+
   // cancel
   { text: "cancel that", expected: [{ tool: "cancel_pending" }] },
 
@@ -367,5 +385,30 @@ describe("parity tools (validateToolCall)", () => {
     expect(guest.ok).toBe(false);
     const owner = validateToolCall({ tool: "get_water_status", args: {} }, ctx);
     expect(owner.ok).toBe(true);
+  });
+});
+
+describe("relative scheduling (validateToolCall)", () => {
+  const actions = [{ tool: "set_heat", args: { body: "spa", mode: "heater" } }];
+
+  it("accepts inMinutes and rounds it", () => {
+    const v = validateToolCall({ tool: "schedule_once", args: { inMinutes: 120.4, actions } }, ctx);
+    expect(v.ok).toBe(true);
+    if (v.ok && v.call.tool === "schedule_once") {
+      expect(v.call.args.inMinutes).toBe(120);
+      expect(v.call.args.at).toBeUndefined();
+    }
+  });
+
+  it("coerces a stringly-typed inMinutes from loose backends", () => {
+    const v = validateToolCall({ tool: "schedule_once", args: { inMinutes: "90", actions } }, ctx);
+    expect(v.ok).toBe(true);
+    if (v.ok && v.call.tool === "schedule_once") expect(v.call.args.inMinutes).toBe(90);
+  });
+
+  it("rejects out-of-range delays and missing times", () => {
+    expect(validateToolCall({ tool: "schedule_once", args: { inMinutes: 0, actions } }, ctx).ok).toBe(false);
+    expect(validateToolCall({ tool: "schedule_once", args: { inMinutes: 8 * 24 * 60, actions } }, ctx).ok).toBe(false);
+    expect(validateToolCall({ tool: "schedule_once", args: { actions } }, ctx).ok).toBe(false);
   });
 });

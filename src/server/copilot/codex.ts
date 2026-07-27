@@ -73,7 +73,14 @@ async function callCodex(text: string, ctx: CopilotContext, model: string, retry
       body: JSON.stringify({
         model,
         instructions,
-        input: [{ type: "message", role: "user", content: [{ type: "input_text", text }] }],
+        input: [
+          ...(ctx.history ?? []).map((h) => ({
+            type: "message",
+            role: h.role,
+            content: [h.role === "assistant" ? { type: "output_text", text: h.content } : { type: "input_text", text: h.content }],
+          })),
+          { type: "message", role: "user", content: [{ type: "input_text", text }] },
+        ],
         tools: [],
         tool_choice: "auto",
         parallel_tool_calls: false,

@@ -36,7 +36,7 @@ export type ToolCall =
   | { tool: "set_pump_speed"; args: { rpm: number } }
   | { tool: "super_chlorinate"; args: { on: boolean; hours: number } }
   | { tool: "all_off"; args: Record<string, never> }
-  | { tool: "schedule_once"; args: { actions: ToolCall[]; at: string } }
+  | { tool: "schedule_once"; args: { actions: ToolCall[]; at?: string; inMinutes?: number } }
   | { tool: "create_schedule"; args: { circuitId: number; start: string; end: string; days: number[] } }
   | { tool: "list_schedules"; args: Record<string, never> }
   | { tool: "delete_schedule"; args: { id: number } }
@@ -74,6 +74,12 @@ export interface PendingPlanRef {
   summary: string[];
 }
 
+/** One prior turn of the thread, passed to LLM backends for follow-ups. */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface CopilotContext {
   snapshot: PoolStateSnapshot;
   scenes: SceneLite[];
@@ -82,6 +88,8 @@ export interface CopilotContext {
   role: Role;
   /** circuit_meta rows with guest_visible = 1, straight from the DB. */
   guestVisibleCircuitIds: ReadonlySet<number>;
+  /** Recent thread turns (oldest first) so LLM backends handle follow-ups. */
+  history?: ChatTurn[];
 }
 
 /* ── JSON Schemas (drive Ollama structured output + shape validation) ───── */
@@ -201,8 +209,12 @@ export const TOOL_DEFS: ToolDef[] = [
   { name: "all_off", description: "Turn every circuit off", argsSchema: objSchema({}) },
   {
     name: "schedule_once",
-    description: 'Run actions later, once. at: ISO datetime or "HH:MM" (next occurrence, tonight semantics)',
-    argsSchema: objSchema({ actions: { type: "array", items: EXEC_CALL_SCHEMA }, at: { type: "string" } }, ["actions", "at"]),
+    description:
+      'Run actions later, once. Relative ("in 2 hours") → inMinutes: minutes from now. Otherwise at: ISO datetime or "HH:MM" (next occurrence, tonight semantics)',
+    argsSchema: objSchema(
+      { actions: { type: "array", items: EXEC_CALL_SCHEMA }, at: { type: "string" }, inMinutes: { type: "number" } },
+      ["actions"]
+    ),
   },
   {
     name: "create_automation",
@@ -517,10 +529,24 @@ export function validateToolCall(raw: unknown, ctx: CopilotContext): ValidationR
       return { ok: true, call: { tool, args: {} } };
 
     case "schedule_once": {
-      if (typeof args.at !== "string") return fail("When should that happen? I couldn't work out the time.");
-      const fireAt = resolveAt(args.at);
-      if (fireAt === null) return fail(`I couldn't understand the time "${args.at}".`);
-      if (fireAt <= Date.now()) return fail("That time is already in the past.");
+      // Two ways to say when: inMinutes (relative, "in 2 hours" → 120) or at
+      // (absolute "HH:MM"/ISO). Lenient on a stringly-typed inMinutes since
+      // not every backend enforces the JSON schema.
+      const inMinutesRaw =
+        num(args.inMinutes) ??
+        (typeof args.inMinutes === "string" && /^\d+(\.\d+)?$/.test(args.inMinutes.trim()) ? Number(args.inMinutes) : undefined);
+      let at: string | undefined;
+      let inMinutes: number | undefined;
+      if (inMinutesRaw !== undefined) {
+        inMinutes = Math.round(inMinutesRaw);
+        if (inMinutes < 1 || inMinutes > 7 * 24 * 60) return fail("I can schedule things between 1 minute and 7 days from now.");
+      } else {
+        if (typeof args.at !== "string") return fail("When should that happen? I couldn't work out the time.");
+        const fireAt = resolveAt(args.at);
+        if (fireAt === null) return fail(`I couldn't understand the time "${args.at}".`);
+        if (fireAt <= Date.now()) return fail("That time is already in the past.");
+        at = args.at;
+      }
       if (!Array.isArray(args.actions) || args.actions.length === 0) return fail("There was nothing to schedule.");
       if (args.actions.length > 10) return fail("That's too many steps for one schedule (max 10).");
       const inner: ToolCall[] = [];
@@ -530,7 +556,13 @@ export function validateToolCall(raw: unknown, ctx: CopilotContext): ValidationR
         if (!EXECUTABLE_TOOLS.has(v.call.tool)) return fail("Only direct pool actions can be scheduled.");
         inner.push(v.call);
       }
-      return { ok: true, call: { tool, args: { actions: inner, at: args.at } } };
+      return {
+        ok: true,
+        call: {
+          tool,
+          args: { actions: inner, ...(at !== undefined ? { at } : {}), ...(inMinutes !== undefined ? { inMinutes } : {}) },
+        },
+      };
     }
 
     case "create_automation": {
@@ -747,6 +779,17 @@ export function toolCallToActions(call: ToolCall, ctx: CopilotContext): PoolActi
 
 /* ── template descriptions (used for plan cards + audit labels) ─────────── */
 
+/** Minutes → "45 min" / "2 hours" / "1h 30m" / "2d 6h". */
+export function formatDuration(mins: number): string {
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h < 24) return m === 0 ? `${h} hour${h === 1 ? "" : "s"}` : `${h}h ${m}m`;
+  const d = Math.floor(h / 24);
+  const rh = h % 24;
+  return rh === 0 ? `${d} day${d === 1 ? "" : "s"}` : `${d}d ${rh}h`;
+}
+
 export function describeTrigger(trigger: AutomationTrigger): string {
   switch (trigger.type) {
     case "time": {
@@ -819,9 +862,13 @@ export function describeToolCall(call: ToolCall, ctx: CopilotContext): string {
       return on > 0 ? `Everything OFF (${on} circuit${on === 1 ? "" : "s"} on now)` : "Everything OFF";
     }
     case "schedule_once": {
-      const fireAt = resolveAt(call.args.at);
-      const when = fireAt !== null ? formatClock(fireAt) : call.args.at;
       const inner = call.args.actions.map((a) => describeToolCall(a, ctx)).join("; ");
+      if (call.args.inMinutes !== undefined) {
+        const eta = formatClock(Date.now() + call.args.inMinutes * 60_000);
+        return `In ${formatDuration(call.args.inMinutes)} (≈${eta}): ${inner}`;
+      }
+      const fireAt = call.args.at !== undefined ? resolveAt(call.args.at) : null;
+      const when = fireAt !== null ? formatClock(fireAt) : call.args.at ?? "?";
       return `At ${when}: ${inner}`;
     }
     case "create_automation": {
