@@ -28,6 +28,7 @@ interface UpdatesInfo {
   };
   config: { auto: boolean; hour: number };
   updater: { reachable: boolean; busy: boolean; log: string[] };
+  installKind: "docker" | "source";
 }
 
 const HOURS = Array.from({ length: 24 }, (_, h) => ({
@@ -164,10 +165,20 @@ export function UpdatesSection(): React.JSX.Element {
           </div>
         )}
 
-        {!info?.updater.reachable && info && (
+        {info && !info.updater.reachable && (
           <p className="mt-3 rounded-lg border border-line bg-abyss/40 px-3 py-2 text-xs text-ink-faint">
-            Updater sidecar not reachable — in-app updates need the Docker stack (older installs: re-run install.sh once
-            to add it). Manual update: <code className="text-ink-dim">install.sh --update</code>
+            {info.installKind === "source" ? (
+              <>
+                Running from a source checkout (dev) — one-tap updates apply to the Docker install on the Pi. Update
+                this checkout with <code className="text-ink-dim">git pull</code>. Checking for new releases still works
+                above.
+              </>
+            ) : (
+              <>
+                Updater sidecar not reachable — older installs: re-run install.sh once to add it. Manual update:{" "}
+                <code className="text-ink-dim">install.sh --update</code>
+              </>
+            )}
           </p>
         )}
 

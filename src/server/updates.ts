@@ -116,6 +116,11 @@ export async function checkForUpdate(): Promise<UpdateState> {
   }
 }
 
+/** "docker" = full stack with the updater sidecar; "source" = running from a checkout (dev). */
+export function installKind(): "docker" | "source" {
+  return UPDATER_URL ? "docker" : "source";
+}
+
 export interface UpdaterStatus {
   reachable: boolean;
   busy: boolean;

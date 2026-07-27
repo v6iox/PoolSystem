@@ -5,6 +5,7 @@ import {
   getUpdateConfig,
   getUpdateState,
   getUpdaterStatus,
+  installKind,
   isNewer,
   saveUpdateConfig,
 } from "@/server/updates";
@@ -23,6 +24,7 @@ export async function GET(): Promise<NextResponse> {
     state,
     config: getUpdateConfig(),
     updater,
+    installKind: installKind(),
   });
 }
 
