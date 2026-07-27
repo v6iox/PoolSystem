@@ -93,13 +93,17 @@ export default function CopilotPage(): React.JSX.Element {
         );
         replaceMessage(threadId, res.message);
         if (res.result) appendMessages(threadId, [res.result]);
+        // Plans can create one-shots/automations/scenes — refresh the lists
+        // so the Schedules page shows them right away.
+        void queryClient.invalidateQueries({ queryKey: ["automations"] });
+        void queryClient.invalidateQueries({ queryKey: ["scenes"] });
       } catch (err) {
         toast("error", "Couldn't run that plan", err instanceof Error ? err.message : "Unknown error");
       } finally {
         setBusyMessageId(null);
       }
     },
-    [appendMessages, busyMessageId, replaceMessage, threadId]
+    [appendMessages, busyMessageId, queryClient, replaceMessage, threadId]
   );
 
   const cancel = useCallback(

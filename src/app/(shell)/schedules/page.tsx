@@ -1,17 +1,23 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { AlertTriangle, CalendarClock, Clock, Eye, Plus, Timer } from "lucide-react";
 import { usePool } from "@/lib/client/pool-state";
 import { roleAtLeast } from "@/types/auth";
 import type { CircuitState, ScheduleState } from "@/types/pool";
+import type { SceneDef } from "@/types/actions";
+import { apiGet } from "@/lib/client/api";
 import { EmptyState, PageHeader, Panel, Skeleton } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { WeekView } from "@/components/schedules/week-view";
 import { ScheduleList } from "@/components/schedules/schedule-list";
 import { ScheduleDialog } from "@/components/schedules/schedule-dialog";
 import { ViewToggle, type ScheduleView } from "@/components/schedules/view-toggle";
+import { AutomationsStrip } from "@/components/schedules/automations-strip";
+import { PendingJobs } from "@/components/automations/pending-jobs";
+import type { AutomationsResponse } from "@/components/automations/describe";
 import { circuitTint, conflictIds, eggTimerDuration, formatDuration } from "@/components/schedules/helpers";
 import { cn } from "@/lib/utils";
 
@@ -66,6 +72,23 @@ export default function SchedulesPage(): React.JSX.Element {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ScheduleState | null>(null);
 
+  // One-shots and automations (copilot- or UI-created) belong here too —
+  // this page is "everything that will happen on its own", not just the panel.
+  const autoQuery = useQuery({
+    queryKey: ["automations"],
+    queryFn: () => apiGet<AutomationsResponse>("/api/automations"),
+    enabled: isFamily,
+    refetchInterval: 60_000,
+  });
+  const { data: scenesData } = useQuery({
+    queryKey: ["scenes"],
+    queryFn: () => apiGet<{ scenes: SceneDef[] }>("/api/scenes"),
+    enabled: isFamily,
+  });
+  const pendingJobs = useMemo(() => autoQuery.data?.pendingJobs ?? [], [autoQuery.data]);
+  const automations = useMemo(() => autoQuery.data?.automations ?? [], [autoQuery.data]);
+  const scenes = useMemo(() => scenesData?.scenes ?? [], [scenesData]);
+
   const schedules = snapshot.schedules;
   const conflicts = useMemo(() => conflictIds(schedules), [schedules]);
   const activeCount = schedules.filter((s) => s.isActive && !s.disabled).length;
@@ -95,11 +118,19 @@ export default function SchedulesPage(): React.JSX.Element {
         title="Schedules"
         subtitle={
           hasLoaded
-            ? schedules.length === 0
-              ? "Nothing scheduled"
-              : `${schedules.length} ${schedules.length === 1 ? "schedule" : "schedules"}${
-                  activeCount > 0 ? ` · ${activeCount} running now` : ""
-                }`
+            ? [
+                schedules.length === 0
+                  ? "Nothing on the panel"
+                  : `${schedules.length} panel ${schedules.length === 1 ? "schedule" : "schedules"}${
+                      activeCount > 0 ? ` · ${activeCount} running now` : ""
+                    }`,
+                pendingJobs.length > 0 ? `${pendingJobs.length} queued` : "",
+                automations.length > 0
+                  ? `${automations.length} ${automations.length === 1 ? "automation" : "automations"}`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" · ")
             : undefined
         }
         action={
@@ -197,6 +228,13 @@ export default function SchedulesPage(): React.JSX.Element {
               )}
             </motion.div>
           </AnimatePresence>
+        </div>
+      )}
+
+      {hasLoaded && isFamily && (pendingJobs.length > 0 || automations.length > 0) && (
+        <div className="mt-6 space-y-6">
+          {pendingJobs.length > 0 && <PendingJobs jobs={pendingJobs} scenes={scenes} disabled={!backendConnected} />}
+          {automations.length > 0 && <AutomationsStrip automations={automations} disabled={!backendConnected} />}
         </div>
       )}
 
