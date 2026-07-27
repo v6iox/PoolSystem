@@ -160,7 +160,10 @@ docker compose exec ollama ollama pull qwen3:1.7b
 4. The dashboard should show your actual bodies, temps and circuits within a
    few seconds. Every circuit name comes from the panel — whatever you named
    things at the panel is what you'll see (rename them prettier later in
-   **Settings → Equipment**).
+   **Settings → Equipment**). Check **Settings → System → Detected
+   equipment** for the full scan: Moonpool automatically hides pages and
+   widgets for gear you don't have (no chlorinator → no chlorinator page),
+   and they appear on their own if you add equipment later.
 5. Flip something harmless (a light) from the Controls page and listen for the
    relay in the panel. That click is the whole stack working.
 
@@ -337,11 +340,35 @@ days; daily rollups are kept forever and stay tiny.
 
 ## 16. Living with ScreenLogic during the transition
 
-RS-485 is multi-drop: njsPC and your existing ScreenLogic adapter can share
-the bus indefinitely. Recommended path: wire the Pi in *alongside*
-ScreenLogic, run Moonpool for a few weeks, and only unplug the ScreenLogic
-adapter when you stop opening the old app (or keep it as a break-glass
-spare — it doesn't interfere).
+First, a fact that makes this much less scary than it sounds:
+**ScreenLogic doesn't own anything.** Your schedules, egg timers, freeze
+protection and heat settings all live **inside the EasyTouch/IntelliTouch
+panel itself**. ScreenLogic is just a window into the panel — and so are
+njsPC and Moonpool. When you open Moonpool's Schedules page you're looking at
+(and editing) *the same panel schedules* ScreenLogic showed you.
+
+What that means in practice:
+
+- **Nothing to disable, nothing to migrate.** Your existing panel schedules
+  appear in Moonpool automatically on first connect. Edits made in either app
+  show up in the other, because there's only one copy — the panel's.
+- **The ScreenLogic adapter can stay wired.** RS-485 is a multi-drop bus;
+  njsPC and ScreenLogic coexist without interfering. Run both for weeks.
+- **When you're ready**, just unplug the ScreenLogic adapter (or leave it as
+  a break-glass spare). There is no off switch to find and no cloud account
+  that fights back — with the adapter unplugged, the ScreenLogic app simply
+  can't connect anymore.
+- **Keep time-of-day equipment runs as *panel schedules*** (Moonpool's
+  Schedules page), not as Moonpool automations. Panel schedules execute in
+  the panel itself, so your pump still runs on schedule even if the Pi is
+  off, rebooting, or dead. Use Moonpool **automations** for the things the
+  panel can't do: sunset offsets, temperature thresholds, salt-low reactions,
+  weather-aware behavior, copilot-created routines.
+- **One caution:** don't create a Moonpool automation that duplicates an
+  existing panel schedule (e.g. both turning the pump on at 8 AM) — nothing
+  breaks, but you'll chase confusing on/off behavior. The Schedules page
+  shows everything the panel will do on its own; check it before adding
+  time-based automations.
 
 ## 17. Troubleshooting
 

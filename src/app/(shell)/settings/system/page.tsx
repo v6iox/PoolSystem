@@ -23,6 +23,7 @@ import {
   StatusPill,
   type PillTone,
 } from "@/components/settings/section";
+import { DetectedEquipment } from "@/components/settings/detected-equipment";
 import { formatRelative } from "@/lib/utils";
 
 /** Read-only system status: connection, panel state, equipment identity, versions. */
@@ -88,6 +89,10 @@ export default function SystemSettingsPage(): React.JSX.Element {
                   <ValueText>{snapshot.lastUpdate > 0 ? formatRelative(snapshot.lastUpdate) : "—"}</ValueText>
                 </SettingRow>
               </SettingsSection>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.03 }}>
+              <DetectedEquipment />
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>

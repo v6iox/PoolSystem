@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { usePool } from "@/lib/client/pool-state";
+import { deriveCapabilities, type SystemCapabilities } from "@/lib/capabilities";
 import { Logo, Wordmark } from "@/components/logo";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/types/auth";
@@ -36,20 +37,22 @@ interface NavItem {
   label: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
   minRole: Role;
+  /** System-scan gate: hide when the installation lacks this equipment. */
+  needs?: (caps: SystemCapabilities) => boolean;
 }
 
 const NAV_MAIN: NavItem[] = [
   { href: "/", label: "Home", icon: Home, minRole: "guest" },
   { href: "/circuits", label: "Controls", icon: ToggleRight, minRole: "guest" },
-  { href: "/heat", label: "Heat", icon: Thermometer, minRole: "family" },
-  { href: "/lights", label: "Lights", icon: Lightbulb, minRole: "guest" },
+  { href: "/heat", label: "Heat", icon: Thermometer, minRole: "family", needs: (c) => c.hasBodies && c.hasHeat },
+  { href: "/lights", label: "Lights", icon: Lightbulb, minRole: "guest", needs: (c) => c.hasLights },
   { href: "/copilot", label: "Copilot", icon: MessageCircle, minRole: "guest" },
 ];
 
 const NAV_MORE: NavItem[] = [
   { href: "/scenes", label: "Scenes", icon: Sparkles, minRole: "guest" },
-  { href: "/pump", label: "Pump", icon: Fan, minRole: "family" },
-  { href: "/chlorinator", label: "Chlorinator", icon: Droplets, minRole: "family" },
+  { href: "/pump", label: "Pump", icon: Fan, minRole: "family", needs: (c) => c.hasPump },
+  { href: "/chlorinator", label: "Chlorinator", icon: Droplets, minRole: "family", needs: (c) => c.hasChlorinator },
   { href: "/schedules", label: "Schedules", icon: CalendarClock, minRole: "family" },
   { href: "/chemistry", label: "Chemistry", icon: FlaskConical, minRole: "family" },
   { href: "/automations", label: "Automations", icon: Workflow, minRole: "family" },
@@ -81,12 +84,17 @@ function ConnectionBanner(): React.JSX.Element | null {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }): React.JSX.Element {
-  const { user, snapshot } = usePool();
+  const { user, snapshot, hasLoaded } = usePool();
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const mainItems = NAV_MAIN.filter((i) => roleAtLeast(user.role, i.minRole));
-  const moreItems = NAV_MORE.filter((i) => roleAtLeast(user.role, i.minRole));
+  // System scan: only offer pages for equipment this installation reports.
+  // Until capabilities are known, gate nothing (no nav flash on load).
+  const caps = deriveCapabilities(snapshot, hasLoaded);
+  const fits = (i: NavItem): boolean =>
+    roleAtLeast(user.role, i.minRole) && (!caps.known || !i.needs || i.needs(caps));
+  const mainItems = NAV_MAIN.filter(fits);
+  const moreItems = NAV_MORE.filter(fits);
   const allItems = [...mainItems, ...moreItems];
 
   const isActive = (href: string): boolean =>

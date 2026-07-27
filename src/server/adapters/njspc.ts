@@ -300,8 +300,14 @@ export class NjspcAdapter implements PoolAdapter {
       const heatModeName = str(b.heatMode);
       const heatStatusName = str(b.heatStatus).toLowerCase();
       const kind: BodyState["kind"] = str(b.type).toLowerCase().includes("spa") || str(b.name).toLowerCase().includes("spa") ? "spa" : "pool";
+      const bodyId = num(b.id);
+      // Heat modes this body actually supports, discovered from config —
+      // a system without solar simply never offers solar modes.
+      const discovered = (["off", "heater", "solar", "solarpref"] as const).filter((mode) =>
+        this.heatModeVals.has(`${bodyId}:${mode}`)
+      );
       return {
-        id: num(b.id),
+        id: bodyId,
         name: str(b.name, kind === "spa" ? "Spa" : "Pool"),
         kind,
         isOn: bool(b.isOn),
@@ -310,7 +316,7 @@ export class NjspcAdapter implements PoolAdapter {
         minSetPoint: num(b.minSetPoint ?? asObj(b).setPointMin, 60),
         maxSetPoint: num(b.maxSetPoint ?? asObj(b).setPointMax, kind === "spa" ? 104 : 95),
         heatMode: heatModeFromName(heatModeName),
-        supportedHeatModes: ["off", "heater", "solar", "solarpref"],
+        supportedHeatModes: discovered.length >= 2 ? [...discovered] : ["off", "heater", "solar", "solarpref"],
         heatStatus: heatStatusName.includes("solar")
           ? "solar"
           : heatStatusName.includes("cool")

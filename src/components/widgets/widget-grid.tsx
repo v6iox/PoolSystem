@@ -15,6 +15,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Check, Expand, EyeOff, GripVertical, LayoutGrid, Shrink } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePool } from "@/lib/client/pool-state";
+import { deriveCapabilities, type SystemCapabilities } from "@/lib/capabilities";
 import { apiGet, apiSend } from "@/lib/client/api";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -37,12 +38,14 @@ export interface WidgetDef {
   component: React.ComponentType;
   /** Grid columns at md+ (1 or 2). */
   defaultWide: boolean;
+  /** System-scan gate: hide when the installation lacks this equipment. */
+  needs?: (caps: SystemCapabilities) => boolean;
 }
 
 const WIDGETS: WidgetDef[] = [
   { id: "toggles", title: "Quick controls", minRole: "guest", component: QuickTogglesWidget, defaultWide: false },
-  { id: "pump", title: "Pump", minRole: "family", component: PumpWidget, defaultWide: false },
-  { id: "chlorinator", title: "Chlorinator & salt", minRole: "family", component: ChlorinatorWidget, defaultWide: false },
+  { id: "pump", title: "Pump", minRole: "family", component: PumpWidget, defaultWide: false, needs: (c) => c.hasPump },
+  { id: "chlorinator", title: "Chlorinator & salt", minRole: "family", component: ChlorinatorWidget, defaultWide: false, needs: (c) => c.hasChlorinator },
   { id: "weather", title: "Weather", minRole: "guest", component: WeatherWidget, defaultWide: false },
   { id: "water", title: "Water level", minRole: "family", component: WaterWidget, defaultWide: false },
   { id: "schedules", title: "Coming up", minRole: "family", component: SchedulesWidget, defaultWide: false },
@@ -124,7 +127,7 @@ function SortableWidget({
 }
 
 export function WidgetGrid(): React.JSX.Element {
-  const { user } = usePool();
+  const { user, snapshot, hasLoaded } = usePool();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [layout, setLayout] = useState<DashboardLayout>(() => defaultLayout(user.role));
@@ -149,7 +152,17 @@ export function WidgetGrid(): React.JSX.Element {
     }
   }, [prefsData]);
 
-  const allowed = useMemo(() => new Set(WIDGETS.filter((w) => roleAtLeast(user.role, w.minRole)).map((w) => w.id)), [user.role]);
+  const caps = deriveCapabilities(snapshot, hasLoaded);
+  const allowed = useMemo(
+    () =>
+      new Set(
+        WIDGETS.filter(
+          (w) => roleAtLeast(user.role, w.minRole) && (!caps.known || !w.needs || w.needs(caps))
+        ).map((w) => w.id)
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user.role, caps.known, caps.hasPump, caps.hasChlorinator]
+  );
   const ordered = layout.order.filter((id) => allowed.has(id));
 
   const persist = (next: DashboardLayout): void => {
