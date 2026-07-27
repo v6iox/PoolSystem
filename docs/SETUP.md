@@ -351,6 +351,19 @@ docker compose exec web node -e "require('better-sqlite3')('/data/moonpool.db').
   && docker cp $(docker compose ps -q web):/data/backup.db ./moonpool-backup-$(date +%F).db
 ```
 
+### The `moonpool` command
+
+The installer links a `moonpool` command onto your PATH (source checkouts:
+run `./scripts/moonpool link` once). It auto-detects whether it's driving the
+Docker stack or a dev checkout:
+
+```bash
+moonpool start     # bring it up          moonpool logs     # follow logs
+moonpool stop      # shut it down         moonpool status   # is it running?
+moonpool restart   # bounce it            moonpool update   # update + restart
+moonpool open      # open in a browser
+```
+
 ### Updates
 
 Moonpool updates itself from GitHub releases. **Settings → System → Software
