@@ -5,7 +5,10 @@ import { NextResponse, type NextRequest } from "next/server";
  * Real session validation (SQLite lookup) happens in route handlers and
  * server components, which run in the Node runtime.
  */
-const PUBLIC_PATHS = ["/login", "/setup", "/api/auth", "/manifest.webmanifest", "/sw.js", "/icons", "/offline"];
+// /api/integrations/* passes through: those routes carry their own auth
+// (voice tokens for Siri, Amazon signature for Alexa, requireUser("owner")
+// for token management) — sessions don't apply to voice assistants.
+const PUBLIC_PATHS = ["/login", "/setup", "/api/auth", "/api/integrations", "/manifest.webmanifest", "/sw.js", "/icons", "/offline"];
 
 export function middleware(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;

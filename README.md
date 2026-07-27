@@ -232,6 +232,29 @@ a deterministic parser stands in for the LLM so chat is fully testable offline �
 that's also what CI runs (`tests/copilot-eval.test.ts`, 30 utterances → expected tool
 calls; set `COPILOT_LIVE=true` to run the same table against live Ollama).
 
+## Voice: Siri & Alexa
+
+Both assistants ride the same copilot engine — same validation, same role
+rules, same audit trail (`source: copilot`). Voice flows can't tap a Confirm
+button, so plans are auto-confirmed and weather advisories are *spoken back*
+("Heads up: rain is forecast tomorrow 3 to 4 PM…"). Set up lives in
+**Settings → Voice · Siri & Alexa** (Owner only).
+
+**Siri (no developer account needed)** — mint a voice token, then build a
+Shortcut: *Dictate text* → *Get contents of URL*
+(`https://<your-url>/api/integrations/siri?token=…&q=<dictated>`) → *Speak
+text*. Name it "Pool" and say "Hey Siri, Pool — warm the spa". Single-purpose
+shortcuts ("Spa Time") can hard-code the `q` parameter.
+
+**Alexa (free developer console skill)** — create a Custom skill, paste the
+interaction model JSON from the settings page (invocation "moonpool"), point
+the endpoint at `https://<your-url>/api/integrations/alexa`, and save the
+Skill ID in Moonpool. Requests are authenticated with Amazon's certificate
+signature + your skill ID + timestamp checks. Then: *"Alexa, ask moonpool
+what the spa temperature is."*
+
+Both need the public HTTPS URL from [Remote access](#remote-access-from-anywhere--no-vpn).
+
 ## Environment reference
 
 | Variable | Default | Purpose |

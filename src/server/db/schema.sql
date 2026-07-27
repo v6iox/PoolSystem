@@ -164,6 +164,16 @@ CREATE TABLE IF NOT EXISTS alert_state (
   last_notified INTEGER
 );
 
+-- Long-lived tokens for voice assistants (Siri Shortcuts, Alexa skill).
+CREATE TABLE IF NOT EXISTS integration_tokens (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  label        TEXT NOT NULL,
+  token_hash   TEXT NOT NULL UNIQUE,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at   INTEGER NOT NULL,
+  last_used_at INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS copilot_threads (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

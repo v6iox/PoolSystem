@@ -5,6 +5,7 @@ import { Flame, Snowflake, Sun, Thermometer, Wind } from "lucide-react";
 import { usePool, patchSetpoint } from "@/lib/client/pool-state";
 import { TempDial } from "@/components/pool/temp-dial";
 import { useAdvisoryGate } from "@/components/pool/advisory-gate";
+import { AskBar } from "@/components/ask/ask-bar";
 import { WidgetGrid } from "@/components/widgets/widget-grid";
 import { Panel, Skeleton } from "@/components/ui/panel";
 import { roleAtLeast } from "@/types/auth";
@@ -146,6 +147,7 @@ function Hero(): React.JSX.Element {
 export default function DashboardPage(): React.JSX.Element {
   return (
     <div className="space-y-8">
+      <AskBar />
       <Hero />
       <WidgetGrid />
     </div>

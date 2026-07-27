@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "motion/react";
-import { Activity, Info, Loader2, LogOut, SlidersHorizontal, Users } from "lucide-react";
+import { Activity, Info, Loader2, LogOut, Mic, SlidersHorizontal, Users } from "lucide-react";
 import { usePool } from "@/lib/client/pool-state";
 import { roleAtLeast } from "@/types/auth";
 import { PageHeader, Panel } from "@/components/ui/panel";
@@ -46,6 +46,12 @@ export default function SettingsPage(): React.JSX.Element {
             icon: <Activity size={19} />,
             title: "Audit log",
             detail: "Every change, who made it, and when",
+          },
+          {
+            href: "/settings/integrations",
+            icon: <Mic size={19} />,
+            title: "Voice · Siri & Alexa",
+            detail: "Tokens, shortcuts, and the Alexa skill",
           },
         ]
       : []),

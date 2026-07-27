@@ -17,21 +17,80 @@ function AssistantAvatar(): React.JSX.Element {
   );
 }
 
-function TypingIndicator(): React.JSX.Element {
+/**
+ * Thinking state: the logo sits in rippling water — expanding rings + a
+ * gentle bob — while droplet dots surface one by one. Reduced motion gets
+ * the plain three-dot fade.
+ */
+export function ThinkingRipple({ label = "reading the water…" }: { label?: string }): React.JSX.Element {
   return (
     <div className="flex items-start gap-2.5">
-      <AssistantAvatar />
-      <Panel className="flex items-center gap-1.5 px-4 py-3.5">
-        {[0, 1, 2].map((i) => (
+      <span className="relative mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center">
+        {[0, 1].map((i) => (
           <motion.span
             key={i}
-            className="h-1.5 w-1.5 rounded-full bg-accent"
-            animate={{ opacity: [0.25, 1, 0.25] }}
-            transition={{ repeat: Infinity, duration: 1.1, delay: i * 0.18, ease: "easeInOut" }}
+            className="absolute inset-0 rounded-full border border-accent/50 motion-reduce:hidden"
+            animate={{ scale: [1, 1.9], opacity: [0.55, 0] }}
+            transition={{ repeat: Infinity, duration: 1.8, delay: i * 0.9, ease: "easeOut" }}
           />
         ))}
+        <motion.span
+          className="glass relative flex h-8 w-8 items-center justify-center rounded-full"
+          animate={{ y: [0, -2.5, 0] }}
+          transition={{ repeat: Infinity, duration: 2.2, ease: "easeInOut" }}
+        >
+          <Logo size={18} />
+        </motion.span>
+      </span>
+      <Panel className="flex items-center gap-2.5 px-4 py-3.5">
+        <span className="flex items-end gap-1.5">
+          {[0, 1, 2].map((i) => (
+            <motion.span
+              key={i}
+              className="h-1.5 w-1.5 rounded-full bg-accent"
+              animate={{ y: [0, -5, 0], opacity: [0.3, 1, 0.3] }}
+              transition={{ repeat: Infinity, duration: 1.15, delay: i * 0.16, ease: "easeInOut" }}
+            />
+          ))}
+        </span>
+        <motion.span
+          className="text-xs text-ink-dim"
+          animate={{ opacity: [0.5, 1, 0.5] }}
+          transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
+        >
+          {label}
+        </motion.span>
       </Panel>
     </div>
+  );
+}
+
+const TypingIndicator = ThinkingRipple;
+
+/** Word-staggered reveal for freshly arrived assistant replies — feels streamed. */
+export function RevealText({ text, animate }: { text: string; animate: boolean }): React.JSX.Element {
+  if (!animate) return <>{text}</>;
+  const words = text.split(/(\s+)/);
+  if (words.length > 160) return <>{text}</>;
+  let wordIndex = 0;
+  return (
+    <>
+      {words.map((word, i) => {
+        if (/^\s+$/.test(word)) return <span key={i}>{word}</span>;
+        const delay = 0.045 * wordIndex++;
+        return (
+          <motion.span
+            key={i}
+            className="inline-block"
+            initial={{ opacity: 0, y: 4, filter: "blur(3px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            transition={{ delay, duration: 0.28, ease: "easeOut" }}
+          >
+            {word}
+          </motion.span>
+        );
+      })}
+    </>
   );
 }
 
@@ -121,7 +180,9 @@ export function MessageList({
                 <AssistantAvatar />
                 <div className="min-w-0 max-w-[85%]">
                   <Panel className={cn("px-3.5 py-2.5", message.plan && "min-w-[min(20rem,100%)]")}>
-                    <p className="text-sm whitespace-pre-wrap text-ink">{message.content}</p>
+                    <p className="text-sm whitespace-pre-wrap text-ink">
+                      <RevealText text={message.content} animate={Date.now() - message.createdAt < 8000} />
+                    </p>
                     <PlanCard
                       message={message}
                       disabled={controlsDisabled}
