@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseUtterance } from "@/server/copilot/mock-parser";
 import { parseWithLlm } from "@/server/copilot/llm";
+import { validateToolCall } from "@/server/copilot/tools";
 import type { CopilotContext, ToolCall } from "@/server/copilot/tools";
 import { EMPTY_SNAPSHOT, type CircuitState, type PoolStateSnapshot } from "@/types/pool";
 
@@ -249,4 +250,62 @@ describe.skipIf(!live)("copilot live LLM eval", () => {
       30_000
     );
   }
+});
+
+describe("panel schedule tools (validateToolCall)", () => {
+  it("resolves circuit names and normalizes create_schedule", () => {
+    const v = validateToolCall(
+      { tool: "create_schedule", args: { circuit: "cleaner", start: "09:00", end: "11:00", days: [1, 2, 3, 4, 5] } },
+      ctx
+    );
+    expect(v.ok).toBe(true);
+    if (v.ok) {
+      expect(v.call).toEqual({
+        tool: "create_schedule",
+        args: { circuitId: 5, start: "09:00", end: "11:00", days: [1, 2, 3, 4, 5] },
+      });
+    }
+  });
+
+  it("rejects malformed times", () => {
+    const v = validateToolCall({ tool: "create_schedule", args: { circuitId: 5, start: "9pm", end: "11:00", days: [] } }, ctx);
+    expect(v.ok).toBe(false);
+  });
+
+  it("denies guests", () => {
+    const v = validateToolCall(
+      { tool: "create_schedule", args: { circuitId: 5, start: "09:00", end: "11:00", days: [] } },
+      { ...ctx, role: "guest" }
+    );
+    expect(v.ok).toBe(false);
+  });
+
+  it("delete requires a schedule that exists", () => {
+    const missing = validateToolCall({ tool: "delete_schedule", args: { id: 99 } }, ctx);
+    expect(missing.ok).toBe(false);
+    const withSchedule: CopilotContext = {
+      ...ctx,
+      snapshot: {
+        ...ctx.snapshot,
+        schedules: [
+          {
+            id: 7,
+            circuitId: 5,
+            circuitName: "Cleaner",
+            startTime: 540,
+            endTime: 660,
+            days: [1],
+            scheduleType: "repeat",
+            isEggTimer: false,
+            heatSetpoint: null,
+            heatSource: null,
+            disabled: false,
+            isActive: false,
+          },
+        ],
+      },
+    };
+    const found = validateToolCall({ tool: "delete_schedule", args: { id: 7 } }, withSchedule);
+    expect(found.ok).toBe(true);
+  });
 });

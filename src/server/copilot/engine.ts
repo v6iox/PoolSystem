@@ -3,16 +3,18 @@ import { getRuntime } from "@/server/runtime";
 import { audit } from "@/server/audit";
 import { createScheduledJob, executeActions, type ActionContext } from "@/server/control";
 import { reloadAutomations } from "@/server/automations/worker";
-import { formatClock, formatRelative } from "@/lib/utils";
+import { formatClock, formatDays, formatMinutes, formatRelative } from "@/lib/utils";
 import type { SessionUser } from "@/types/auth";
 import type { Role } from "@/types/auth";
 import type { AutomationTrigger, PoolAction } from "@/types/actions";
 import { CopilotBackendError } from "./llm";
 import { parseWithProvider } from "./provider";
+import { isGreeting } from "./mock-parser";
 import {
   describeToolCall,
   describeTrigger,
   isReadOnlyTool,
+  parseHHMM,
   resolveAt,
   toolCallToActions,
   validateToolCall,
@@ -325,9 +327,20 @@ function automationsReply(ctx: CopilotContext): string {
   return `You have ${ctx.automations.length} automation${ctx.automations.length === 1 ? "" : "s"}:\n${lines.join("\n")}`;
 }
 
+function schedulesReply(ctx: CopilotContext): string {
+  const schedules = ctx.snapshot.schedules;
+  if (schedules.length === 0) return "There are no panel schedules yet — tell me something like “run the cleaner 9:00 to 11:00 on weekdays” and I'll set one up.";
+  const lines = schedules.map(
+    (s) =>
+      `#${s.id} ${s.circuitName} — ${formatMinutes(s.startTime)}–${formatMinutes(s.endTime)} · ${formatDays(s.days)}${s.disabled ? " (disabled)" : s.isActive ? " (running now)" : ""}`
+  );
+  return `Panel schedules (these run in the panel itself):\n${lines.map((l) => `• ${l}`).join("\n")}`;
+}
+
 function runReadTool(call: ToolCall, ctx: CopilotContext): string {
   if (call.tool === "get_status") return statusReply(call.args.scope ?? "all", ctx);
   if (call.tool === "list_automations") return automationsReply(ctx);
+  if (call.tool === "list_schedules") return schedulesReply(ctx);
   return "";
 }
 
@@ -395,6 +408,12 @@ export async function processMessage(
       rawCalls = parsed.calls;
       note = parsed.note;
       chatReply = parsed.reply;
+      // Deterministic guard: plain greetings/small talk can never carry
+      // actions, whatever a small model hallucinates. Keep its reply, drop
+      // any phantom tool calls.
+      if (rawCalls.length > 0 && isGreeting(trimmed.toLowerCase())) {
+        rawCalls = [];
+      }
     } catch (err) {
       const detail = err instanceof CopilotBackendError ? err.message : "copilot backend unreachable";
       const assistant = insertMessage(
@@ -500,7 +519,51 @@ async function executeToolCall(
   switch (call.tool) {
     case "get_status":
     case "list_automations":
+    case "list_schedules":
       return { ok: true, line: runReadTool(call, ctx) };
+
+    case "create_schedule": {
+      const start = parseHHMM(call.args.start);
+      const end = parseHHMM(call.args.end);
+      if (start === null || end === null) return { ok: false, line: "Failed: schedule times must be HH:MM." };
+      const days = call.args.days.length > 0 ? call.args.days : [0, 1, 2, 3, 4, 5, 6];
+      try {
+        await getRuntime().adapter.upsertSchedule({
+          circuitId: call.args.circuitId,
+          startTime: start,
+          endTime: end,
+          days,
+          scheduleType: "repeat",
+        });
+        audit({
+          userId: actionCtx.userId,
+          userName: actionCtx.userName,
+          source: "copilot",
+          action: "createSchedule",
+          target: `circuit ${call.args.circuitId}`,
+          newValue: `${call.args.start}–${call.args.end} days ${days.join(",")}`,
+        });
+        return { ok: true, line: describeToolCall(call, ctx) };
+      } catch (err) {
+        return { ok: false, line: `Failed: ${err instanceof Error ? err.message : "couldn't write the schedule"}` };
+      }
+    }
+
+    case "delete_schedule": {
+      try {
+        await getRuntime().adapter.deleteSchedule(call.args.id);
+        audit({
+          userId: actionCtx.userId,
+          userName: actionCtx.userName,
+          source: "copilot",
+          action: "deleteSchedule",
+          target: `schedule ${call.args.id}`,
+        });
+        return { ok: true, line: describeToolCall(call, ctx) };
+      } catch (err) {
+        return { ok: false, line: `Failed: ${err instanceof Error ? err.message : "couldn't delete the schedule"}` };
+      }
+    }
 
     case "schedule_once": {
       const fireAt = resolveAt(call.args.at);

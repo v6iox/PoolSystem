@@ -36,6 +36,9 @@ export type ToolCall =
   | { tool: "super_chlorinate"; args: { on: boolean; hours: number } }
   | { tool: "all_off"; args: Record<string, never> }
   | { tool: "schedule_once"; args: { actions: ToolCall[]; at: string } }
+  | { tool: "create_schedule"; args: { circuitId: number; start: string; end: string; days: number[] } }
+  | { tool: "list_schedules"; args: Record<string, never> }
+  | { tool: "delete_schedule"; args: { id: number } }
   | { tool: "create_automation"; args: { name: string; trigger: AutomationTrigger; actions: ToolCall[] } }
   | { tool: "list_automations"; args: Record<string, never> }
   | { tool: "pause_automation"; args: { id: number } }
@@ -130,7 +133,7 @@ export const EXECUTABLE_TOOLS: ReadonlySet<ToolName> = new Set([
   "all_off",
 ]);
 
-export const READ_ONLY_TOOLS: ReadonlySet<ToolName> = new Set(["get_status", "list_automations"]);
+export const READ_ONLY_TOOLS: ReadonlySet<ToolName> = new Set(["get_status", "list_automations", "list_schedules"]);
 
 export function isReadOnlyTool(tool: ToolName): boolean {
   return READ_ONLY_TOOLS.has(tool);
@@ -202,6 +205,22 @@ export const TOOL_DEFS: ToolDef[] = [
       ["name", "trigger", "actions"]
     ),
   },
+  {
+    name: "create_schedule",
+    description:
+      'Create a PANEL schedule: a recurring daily/weekly ON window for one circuit (runs in the Pentair panel itself). start/end "HH:MM" 24h; days 0=Sun..6=Sat, [] = every day',
+    argsSchema: objSchema(
+      {
+        circuitId: { type: "number" },
+        start: { type: "string" },
+        end: { type: "string" },
+        days: { type: "array", items: { type: "number" } },
+      },
+      ["circuitId", "start", "end"]
+    ),
+  },
+  { name: "list_schedules", description: "List the panel schedules", argsSchema: objSchema({}) },
+  { name: "delete_schedule", description: "Delete a panel schedule by id", argsSchema: objSchema({ id: { type: "number" } }, ["id"]) },
   { name: "list_automations", description: "List the saved automations", argsSchema: objSchema({}) },
   { name: "pause_automation", description: "Pause an automation by id", argsSchema: objSchema({ id: { type: "number" } }, ["id"]) },
   { name: "resume_automation", description: "Resume a paused automation by id", argsSchema: objSchema({ id: { type: "number" } }, ["id"]) },
@@ -284,6 +303,17 @@ export function lightTargets(ctx: CopilotContext): { groups: PoolStateSnapshot["
     groups: ctx.snapshot.lightGroups,
     lights: allCircuits(ctx.snapshot).filter((c) => c.isLight),
   };
+}
+
+/** "HH:MM" (24h) → minutes from midnight, or null. */
+export function parseHHMM(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!m || m[1] === undefined || m[2] === undefined) return null;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (hour > 23 || minute > 59) return null;
+  return hour * 60 + minute;
 }
 
 /** Resolve a schedule "at" ("HH:MM" tonight-semantics, or ISO) to epoch ms. */
@@ -469,6 +499,32 @@ export function validateToolCall(raw: unknown, ctx: CopilotContext): ValidationR
       return { ok: true, call: { tool, args: { name, trigger: args.trigger as AutomationTrigger, actions: inner } } };
     }
 
+    case "create_schedule": {
+      if (isGuest) return fail(GUEST_DENIED);
+      const ref = num(args.circuitId) ?? (typeof args.circuit === "string" ? args.circuit : typeof args.name === "string" ? args.name : undefined);
+      if (ref === undefined) return fail("Which circuit should the schedule run? I couldn't tell.");
+      const circuit = findCircuit(ctx, ref);
+      if (!circuit) return fail(`I can't find a circuit called "${String(ref)}" on this system.`);
+      const start = parseHHMM(args.start);
+      const end = parseHHMM(args.end);
+      if (start === null || end === null) return fail('Schedule times need to be like "09:00" and "17:30" (24h).');
+      if (start === end) return fail("The schedule's start and end are the same time.");
+      const days = Array.isArray(args.days) ? args.days.map((d) => num(d)).filter((d): d is number => d !== undefined && d >= 0 && d <= 6) : [];
+      return { ok: true, call: { tool, args: { circuitId: circuit.id, start: args.start as string, end: args.end as string, days } } };
+    }
+
+    case "list_schedules":
+      if (isGuest) return fail(GUEST_DENIED);
+      return { ok: true, call: { tool, args: {} } };
+
+    case "delete_schedule": {
+      if (isGuest) return fail(GUEST_DENIED);
+      const id = num(args.id);
+      const schedule = ctx.snapshot.schedules.find((s) => s.id === id);
+      if (!schedule) return fail(`There's no panel schedule with id ${String(args.id)} — ask me to list the schedules first.`);
+      return { ok: true, call: { tool, args: { id: schedule.id } } };
+    }
+
     case "list_automations":
       return { ok: true, call: { tool, args: {} } };
 
@@ -622,6 +678,19 @@ export function describeToolCall(call: ToolCall, ctx: CopilotContext): string {
     case "create_automation": {
       const inner = call.args.actions.map((a) => describeToolCall(a, ctx)).join("; ");
       return `New automation “${call.args.name}” — ${describeTrigger(call.args.trigger)}: ${inner}`;
+    }
+    case "create_schedule": {
+      const circuit = allCircuits(ctx.snapshot).find((c) => c.id === call.args.circuitId);
+      const start = parseHHMM(call.args.start);
+      const end = parseHHMM(call.args.end);
+      const window = `${start !== null ? formatMinutes(start) : call.args.start}–${end !== null ? formatMinutes(end) : call.args.end}`;
+      return `Panel schedule: ${circuit?.name ?? `circuit ${call.args.circuitId}`} ${window} · ${formatDays(call.args.days.length > 0 ? call.args.days : [0, 1, 2, 3, 4, 5, 6])}`;
+    }
+    case "list_schedules":
+      return "List panel schedules";
+    case "delete_schedule": {
+      const schedule = ctx.snapshot.schedules.find((s) => s.id === call.args.id);
+      return `Delete panel schedule — ${schedule ? `${schedule.circuitName} ${formatMinutes(schedule.startTime)}–${formatMinutes(schedule.endTime)}` : `id ${call.args.id}`}`;
     }
     case "list_automations":
       return "List automations";
