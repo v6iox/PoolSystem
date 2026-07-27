@@ -12,7 +12,11 @@ import { RESPONSE_JSON_SCHEMA, TOOL_DEFS, allCircuits } from "./tools";
  *      COPILOT_MODEL (default "qwen3:1.7b"), COPILOT_API_KEY (optional).
  */
 
-const TIMEOUT_MS = 10_000;
+// Local models can be slow: a cold Ollama request reloads the model from
+// disk, and small "thinking" models reason at length before the JSON comes
+// out. 60s keeps real requests from dying mid-think; hosted providers pass
+// tighter overrides.
+const TIMEOUT_MS = Number(process.env.COPILOT_TIMEOUT_MS ?? "") || 60_000;
 
 export class CopilotBackendError extends Error {
   constructor(message: string) {
@@ -109,7 +113,9 @@ export async function parseWithLlm(text: string, ctx: CopilotContext, overrides:
         messages: [
           { role: "system", content: buildSystemPrompt(ctx) },
           ...(ctx.history ?? []).map((h) => ({ role: h.role, content: h.content })),
-          { role: "user", content: text },
+          // Qwen3 soft-switch: skip the long thinking phase — structured tool
+          // calls don't benefit and a 1.7B model can think past any timeout.
+          { role: "user", content: /qwen3/i.test(model) ? `${text} /no_think` : text },
         ],
         response_format: {
           type: "json_schema",
@@ -145,7 +151,8 @@ export async function parseWithLlm(text: string, ctx: CopilotContext, overrides:
   } catch (err) {
     if (err instanceof CopilotBackendError) throw err;
     const aborted = err instanceof Error && err.name === "AbortError";
-    throw new CopilotBackendError(aborted ? "the model took too long to answer" : "copilot backend unreachable");
+    const limitS = Math.round((overrides.timeoutMs ?? TIMEOUT_MS) / 1000);
+    throw new CopilotBackendError(aborted ? `the model took longer than ${limitS}s to answer` : "copilot backend unreachable");
   } finally {
     clearTimeout(timer);
   }
