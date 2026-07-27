@@ -7,6 +7,7 @@ import {
   BellOff,
   BellRing,
   Droplets,
+  Flame,
   FlaskConical,
   Loader2,
   Snowflake,
@@ -36,6 +37,7 @@ type AlertToggleKind =
   | "saltLow"
   | "chemistryOutOfRange"
   | "spaAtTemp"
+  | "heaterStall"
   | "njspcOffline"
   | "waterLow"
   | "lightning";
@@ -46,6 +48,7 @@ const ALERT_TOGGLES: Array<{ kind: AlertToggleKind; label: string; hint: string;
   { kind: "saltLow", label: "Salt low", hint: "Chlorinator salt below the threshold", icon: <Droplets size={17} /> },
   { kind: "chemistryOutOfRange", label: "Chemistry out of range", hint: "pH / sanitizer outside ideal bands", icon: <FlaskConical size={17} /> },
   { kind: "spaAtTemp", label: "Spa at temperature", hint: "Soak's ready — spa reached its setpoint", icon: <Thermometer size={17} /> },
+  { kind: "heaterStall", label: "Heater not heating", hint: "Says it's heating but the water isn't warming, or it quit mid-heat", icon: <Flame size={17} /> },
   { kind: "njspcOffline", label: "Controller offline", hint: "Moonpool lost the pool controller", icon: <WifiOff size={17} /> },
   { kind: "waterLow", label: "Water level low", hint: "Evaporation estimate says it's time to top off", icon: <Waves size={17} /> },
   { kind: "lightning", label: "Lightning nearby", hint: "Tempest strike detection — out of the pool", icon: <Zap size={17} /> },

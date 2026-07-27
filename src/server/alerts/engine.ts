@@ -1,6 +1,7 @@
 import { getDb, now } from "@/server/db";
 import { getAppSettings } from "@/server/settings";
 import { sendAlert, type AlertKind } from "@/server/push";
+import { assessHeaters } from "@/server/alerts/heater-watchdog";
 import { estimateWaterLevel } from "@/server/water";
 import type { Runtime } from "@/server/runtime";
 import type { PoolStateSnapshot } from "@/types/pool";
@@ -95,6 +96,12 @@ function evaluate(snap: PoolStateSnapshot): void {
         `${b.name} reached ${b.setPoint}${deg}. Enjoy!`
       );
     }
+  }
+
+  // Heater watchdog: "heating" but the water isn't warming, or the heater
+  // dropped out well short of the setpoint with heat mode still on.
+  for (const cond of assessHeaters(snap)) {
+    fire("heaterStall", cond.key, cond.active, cond.title, cond.body);
   }
 
   for (const chem of snap.chem) {
