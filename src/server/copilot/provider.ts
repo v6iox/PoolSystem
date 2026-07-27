@@ -70,10 +70,14 @@ export async function parseWithProvider(text: string, ctx: CopilotContext): Prom
   }
 
   // Default: env-configured backend; deterministic parser when simulating.
-  if (process.env.MOCK_MODE === "true" || process.env.COPILOT_FORCE_MOCK === "true") {
+  // COPILOT_FORCE_LLM=true opts into the real local LLM even in MOCK_MODE
+  // (useful for testing models against the simulator on a dev machine).
+  const forceLlm = process.env.COPILOT_FORCE_LLM === "true";
+  if (!forceLlm && (process.env.MOCK_MODE === "true" || process.env.COPILOT_FORCE_MOCK === "true")) {
     const parsed = parseUtterance(text, ctx);
     return { calls: parsed.calls, note: parsed.note };
   }
-  const plan = await parseWithLlm(text, ctx);
+  // The Settings model override applies to the local brain too.
+  const plan = await parseWithLlm(text, ctx, config.model ? { model: config.model } : {});
   return { calls: plan.tool_calls, note: plan.needs_confirmation_note };
 }
