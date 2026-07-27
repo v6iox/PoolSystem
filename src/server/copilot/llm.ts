@@ -57,13 +57,20 @@ export function buildSystemPrompt(ctx: CopilotContext): string {
   ].join("\n");
 }
 
-export async function parseWithLlm(text: string, ctx: CopilotContext): Promise<LlmPlan> {
-  const base = (process.env.COPILOT_BASE_URL ?? "http://localhost:11434/v1").replace(/\/+$/, "");
-  const model = process.env.COPILOT_MODEL ?? "qwen3:1.7b";
-  const apiKey = process.env.COPILOT_API_KEY;
+export interface LlmOverrides {
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  timeoutMs?: number;
+}
+
+export async function parseWithLlm(text: string, ctx: CopilotContext, overrides: LlmOverrides = {}): Promise<LlmPlan> {
+  const base = (overrides.baseUrl ?? process.env.COPILOT_BASE_URL ?? "http://localhost:11434/v1").replace(/\/+$/, "");
+  const model = overrides.model ?? process.env.COPILOT_MODEL ?? "qwen3:1.7b";
+  const apiKey = overrides.apiKey ?? process.env.COPILOT_API_KEY;
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), overrides.timeoutMs ?? TIMEOUT_MS);
   try {
     const res = await fetch(`${base}/chat/completions`, {
       method: "POST",
@@ -112,7 +119,7 @@ export async function parseWithLlm(text: string, ctx: CopilotContext): Promise<L
   } catch (err) {
     if (err instanceof CopilotBackendError) throw err;
     const aborted = err instanceof Error && err.name === "AbortError";
-    throw new CopilotBackendError(aborted ? "the model took longer than 10s to answer" : "copilot backend unreachable");
+    throw new CopilotBackendError(aborted ? "the model took too long to answer" : "copilot backend unreachable");
   } finally {
     clearTimeout(timer);
   }

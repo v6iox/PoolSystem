@@ -50,8 +50,8 @@ export default function SettingsPage(): React.JSX.Element {
           {
             href: "/settings/integrations",
             icon: <Mic size={19} />,
-            title: "Voice · Siri & Alexa",
-            detail: "Tokens, shortcuts, and the Alexa skill",
+            title: "Voice & AI",
+            detail: "Siri, Alexa, and the copilot brain (Ollama / OpenAI)",
           },
         ]
       : []),

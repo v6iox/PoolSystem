@@ -7,8 +7,8 @@ import { formatClock, formatRelative } from "@/lib/utils";
 import type { SessionUser } from "@/types/auth";
 import type { Role } from "@/types/auth";
 import type { AutomationTrigger, PoolAction } from "@/types/actions";
-import { parseUtterance } from "./mock-parser";
-import { CopilotBackendError, parseWithLlm } from "./llm";
+import { CopilotBackendError } from "./llm";
+import { parseWithProvider } from "./provider";
 import {
   describeToolCall,
   describeTrigger,
@@ -383,19 +383,16 @@ export async function processMessage(
   }
 
   const ctx = buildContext(user.role, threadId);
-  const useMock = process.env.MOCK_MODE === "true" || process.env.COPILOT_FORCE_MOCK === "true";
 
   let rawCalls: unknown[] = [];
   let note: string | undefined;
-  if (useMock) {
-    const parsed = parseUtterance(trimmed, ctx);
-    rawCalls = parsed.calls;
-    note = parsed.note;
-  } else {
+  {
     try {
-      const parsed = await parseWithLlm(trimmed, ctx);
-      rawCalls = parsed.tool_calls;
-      note = parsed.needs_confirmation_note;
+      // Dispatches to the configured brain: local Ollama / OpenAI API key /
+      // ChatGPT sign-in — or the deterministic parser in MOCK_MODE.
+      const parsed = await parseWithProvider(trimmed, ctx);
+      rawCalls = parsed.calls;
+      note = parsed.note;
     } catch (err) {
       const detail = err instanceof CopilotBackendError ? err.message : "copilot backend unreachable";
       const assistant = insertMessage(

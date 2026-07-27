@@ -226,11 +226,31 @@ How it stays safe and fast on a Pi:
    intent, so responses are instant even at ~5–10 tok/s.
 6. Everything lands in the audit log as `copilot`.
 
-Swap to a cloud model anytime with env only, e.g. Claude Haiku via an OpenAI-compatible
-gateway: set `COPILOT_BASE_URL`, `COPILOT_MODEL`, `COPILOT_API_KEY`. In `MOCK_MODE`
-a deterministic parser stands in for the LLM so chat is fully testable offline —
-that's also what CI runs (`tests/copilot-eval.test.ts`, 30 utterances → expected tool
-calls; set `COPILOT_LIVE=true` to run the same table against live Ollama).
+### Choosing the copilot's brain
+
+**Settings → Voice & AI** (Owner) switches between three backends live — no env
+changes, no restart:
+
+1. **Local (Ollama)** — default. Private, free, runs on the Pi.
+2. **OpenAI API key** — the official API (`gpt-4o-mini` by default) with strict
+   structured outputs. The key is stored only in the Pi's SQLite.
+3. **Sign in with ChatGPT** — OpenClaw/Codex-style OAuth (PKCE against
+   `auth.openai.com`) that runs the copilot on your ChatGPT Plus/Pro
+   subscription instead of API billing. Click *Sign in with ChatGPT*, finish
+   the login, then paste back the `localhost:1455` URL you land on (that page
+   can't load — Moonpool just needs the code in it). Tokens stay on the Pi and
+   refresh automatically. ⚠ This rides an unofficial backend; if OpenAI
+   changes it, flip to an API key.
+
+Whichever brain is active, nothing changes about safety: the model only parses
+intent into tool calls, every argument is validated and role-checked, plans
+confirm before touching equipment, and it all lands in the audit log.
+
+You can also stay env-only (e.g. Claude via an OpenAI-compatible gateway): set
+`COPILOT_BASE_URL`, `COPILOT_MODEL`, `COPILOT_API_KEY`. In `MOCK_MODE` a
+deterministic parser stands in for the LLM so chat is fully testable offline —
+that's also what CI runs (`tests/copilot-eval.test.ts`, 30 utterances → expected
+tool calls; set `COPILOT_LIVE=true` to run the same table against live Ollama).
 
 ## Voice: Siri & Alexa
 

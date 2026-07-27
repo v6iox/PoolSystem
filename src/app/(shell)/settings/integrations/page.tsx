@@ -12,6 +12,7 @@ import { PageHeader, Panel, EmptyState } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Input, Field } from "@/components/ui/input";
 import { OwnerOnlyState, SettingsSection } from "@/components/settings/section";
+import { CopilotBrainSection } from "@/components/settings/copilot-brain-section";
 import { formatRelative } from "@/lib/utils";
 
 interface TokenRow {
@@ -91,7 +92,7 @@ export default function IntegrationsPage(): React.JSX.Element {
   if (!isOwner) {
     return (
       <div>
-        <PageHeader title="Voice" subtitle="Siri & Alexa" />
+        <PageHeader title="Voice & AI" subtitle="Siri, Alexa & the copilot brain" />
         <OwnerOnlyState />
       </div>
     );
@@ -141,11 +142,15 @@ export default function IntegrationsPage(): React.JSX.Element {
   return (
     <div>
       <PageHeader
-        title="Voice"
-        subtitle="Hey Siri / Alexa — same copilot, same rules, everything audited"
+        title="Voice & AI"
+        subtitle="Hey Siri / Alexa + the copilot brain — same rules, everything audited"
       />
       <div className="mx-auto max-w-2xl space-y-6">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+          <CopilotBrainSection />
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.03 }}>
           <SettingsSection title="Voice tokens" icon={<KeyRound size={17} />}>
             <div className="p-4">
             <p className="mb-3 text-sm text-ink-dim">
