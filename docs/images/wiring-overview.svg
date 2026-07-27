@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#7de3f4"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="560" rx="16" fill="#071522"/>
+  <text x="40" y="52" fill="#e6f3f7" font-size="24" font-weight="700">How Moonpool connects to your pool</text>
+  <text x="40" y="78" fill="#94b8c7" font-size="14">RS-485 is a multi-drop bus — every device shares the same two wires. Nothing has to be removed.</text>
+
+  <!-- Panel -->
+  <rect x="40" y="120" width="230" height="280" rx="14" fill="#0c2130" stroke="#2b4a5e" stroke-width="1.5"/>
+  <text x="155" y="152" fill="#e6f3f7" font-size="16" font-weight="700" text-anchor="middle">Pentair panel</text>
+  <text x="155" y="172" fill="#94b8c7" font-size="12" text-anchor="middle">EasyTouch / IntelliTouch</text>
+  <text x="155" y="190" fill="#5b7c8c" font-size="11" text-anchor="middle">(outdoor equipment pad)</text>
+  <!-- circuit breaker warning -->
+  <rect x="60" y="206" width="190" height="30" rx="8" fill="#3a1d20" stroke="#8a4a50"/>
+  <text x="155" y="226" fill="#ff9d9d" font-size="11.5" font-weight="600" text-anchor="middle">⚡ power OFF at breaker first</text>
+  <!-- COM port -->
+  <rect x="90" y="290" width="130" height="72" rx="8" fill="#123125" stroke="#2f7d4f" stroke-width="1.5"/>
+  <text x="155" y="312" fill="#8fe3ae" font-size="13" font-weight="700" text-anchor="middle">COM port</text>
+  <text x="155" y="330" fill="#8fe3ae" font-size="11" text-anchor="middle">4 screw terminals</text>
+  <text x="155" y="348" fill="#5b9c74" font-size="10.5" text-anchor="middle">(see close-up diagram)</text>
+
+  <!-- Bus: two wires -->
+  <path d="M220 318 H 420" stroke="#e8c74a" stroke-width="4" fill="none"/>
+  <path d="M220 334 H 420" stroke="#4fae6d" stroke-width="4" fill="none"/>
+  <text x="320" y="300" fill="#94b8c7" font-size="12" text-anchor="middle">the RS-485 bus</text>
+  <text x="320" y="360" fill="#5b7c8c" font-size="11" text-anchor="middle">+DATA (yellow) · −DATA (green)</text>
+
+  <!-- Bus spine going vertical to taps -->
+  <path d="M420 318 V 170 M420 334 V 480" stroke="#2b4a5e" stroke-width="2" fill="none"/>
+  <path d="M420 318 H 470" stroke="#e8c74a" stroke-width="3"/>
+  <path d="M420 334 H 470" stroke="#4fae6d" stroke-width="3"/>
+
+  <!-- Tap 1: ScreenLogic -->
+  <path d="M420 170 H 470" stroke="#2b4a5e" stroke-width="2.5"/>
+  <rect x="470" y="132" width="240" height="72" rx="12" fill="#0c2130" stroke="#2b4a5e" stroke-width="1.5"/>
+  <text x="590" y="160" fill="#e6f3f7" font-size="14" font-weight="600" text-anchor="middle">ScreenLogic adapter</text>
+  <text x="590" y="180" fill="#5b7c8c" font-size="11.5" text-anchor="middle">your existing one — can stay</text>
+  <text x="590" y="195" fill="#5b7c8c" font-size="11.5" text-anchor="middle">plugged in, or be unplugged</text>
+
+  <!-- Tap 2: USB adapter + Pi -->
+  <rect x="470" y="286" width="240" height="80" rx="12" fill="#0c2c3e" stroke="#3a7d94" stroke-width="2"/>
+  <text x="590" y="314" fill="#7de3f4" font-size="14" font-weight="700" text-anchor="middle">USB RS-485 adapter</text>
+  <text x="590" y="334" fill="#94b8c7" font-size="11.5" text-anchor="middle">~$12 — FTDI / CH340 with</text>
+  <text x="590" y="349" fill="#94b8c7" font-size="11.5" text-anchor="middle">screw terminals A / B</text>
+
+  <path d="M710 326 H 760" stroke="#7de3f4" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="735" y="314" fill="#94b8c7" font-size="11" text-anchor="middle">USB</text>
+
+  <rect x="760" y="270" width="200" height="112" rx="12" fill="#0c2c3e" stroke="#3a7d94" stroke-width="2"/>
+  <text x="860" y="300" fill="#7de3f4" font-size="15" font-weight="700" text-anchor="middle">Raspberry Pi</text>
+  <text x="860" y="322" fill="#94b8c7" font-size="12" text-anchor="middle">njsPC + Moonpool</text>
+  <text x="860" y="340" fill="#5b7c8c" font-size="11" text-anchor="middle">(Docker, one command)</text>
+  <text x="860" y="362" fill="#5b7c8c" font-size="11" text-anchor="middle">everything stored here</text>
+
+  <!-- Phone -->
+  <path d="M860 270 V 220" stroke="#7de3f4" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+  <rect x="815" y="150" width="90" height="70" rx="12" fill="#0c2130" stroke="#2b4a5e" stroke-width="1.5"/>
+  <text x="860" y="180" fill="#e6f3f7" font-size="12.5" font-weight="600" text-anchor="middle">your phone</text>
+  <text x="860" y="198" fill="#5b7c8c" font-size="10.5" text-anchor="middle">HTTPS · PWA</text>
+  <text x="775" y="245" fill="#5b7c8c" font-size="10.5" text-anchor="end">Wi-Fi / tunnel</text>
+
+  <!-- Tap 3: wireless link (alternative) -->
+  <path d="M420 480 H 470" stroke="#2b4a5e" stroke-width="2.5"/>
+  <rect x="470" y="442" width="490" height="76" rx="12" fill="#0c2130" stroke="#2b4a5e" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="490" y="470" fill="#e6f3f7" font-size="13.5" font-weight="600">Alternative tap point: Pentair wireless link kit</text>
+  <text x="490" y="490" fill="#5b7c8c" font-size="11.5">If the panel's bus already runs to an indoor transceiver, connect the USB adapter</text>
+  <text x="490" y="506" fill="#5b7c8c" font-size="11.5">to the same +DATA / −DATA screws there — no new wire to the pad needed.</text>
+</svg>

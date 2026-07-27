@@ -100,14 +100,22 @@ transceiver or ScreenLogic adapter uses). RS-485 is **multi-drop**: multiple
 listeners coexist happily, so you don't need to remove anything that's
 already connected.
 
-1. Power off the panel at the breaker.
+![How Moonpool connects](images/wiring-overview.svg)
+
+1. **Power off the panel at the breaker.** High voltage lives inside.
 2. Find the COM port screw terminals (green connector on most EasyTouch /
-   IntelliTouch boards — check your panel manual).
-3. Run two conductors to your Pi location (or to wherever the indoor
-   transceiver lives and tap there).
-4. Connect to the USB adapter: panel **DATA+ → adapter A/+**, panel
-   **DATA− → adapter B/−**. If nothing shows up later, swap them — reversed
-   polarity is harmless and is the #1 first-try mistake.
+   IntelliTouch boards — check your panel manual). The four terminals are:
+   **RED +15 VDC** (do not connect!), **YEL +DATA**, **GRN −DATA**,
+   **BLK GND** (optional).
+3. Run two conductors to your Pi location (or tap at the indoor wireless-link
+   transceiver if the bus already runs into the house — same two screws
+   there, no new wire to the pad needed).
+4. Connect to the USB adapter: **YEL +DATA → adapter A/+**, **GRN −DATA →
+   adapter B/−**. If nothing shows up later, swap them — reversed polarity is
+   harmless and is the #1 first-try mistake.
+
+![Terminal close-up](images/wiring-terminals.svg)
+
 5. Plug the adapter into the Pi, power the panel back on, and confirm:
 
 ```bash
