@@ -1,53 +1,52 @@
-## Moonpool v1.0.5 🌙
+## Moonpool v1.0.6 🌙
 
-Correctness release, proven on real hardware — a Raspberry Pi 4 driving a
-Pentair EasyTouch over RS-485. If you're on v1.0.4 with auto-update enabled,
-this one installs itself.
+The whole panel, on the wire. Every digital feature the Pentair link exposes
+now has a home in Moonpool — each one capability-gated, so your install only
+shows the hardware you actually have. If you're on v1.0.5 with auto-update
+enabled, this one installs itself.
 
-### The copilot stops guessing
+### New panel powers
 
-- **Grounded against your own words** — which body, which circuit, and when
-  are now settled deterministically from the sentence you typed, overriding
-  whatever the model returns. "Turn on the hot tub at 9 pm" can no longer
-  become "pool heater, right now" — with any brain, including the tiny ones.
-- **Scheduled times are pinned when you ask** — a 9 PM plan confirmed at 9:01
-  no longer slides a day; date handling and past-time refusals tightened.
-- **No more double-fire** — an action meant for later can't also run now.
-- **"Stop the shock" stops it** (it used to start one), a missing body is
-  asked about instead of assumed, and a setpoint with the heater off now
-  turns the heater on instead of reporting success while doing nothing.
-- **Small-context safety** — chat history is trimmed to fit the model's
-  context window instead of silently truncating the system prompt.
+- **Sunrise/sunset schedules, panel-native** — anchor a schedule's start or
+  end to sunrise or sunset and the panel recomputes the time daily by
+  itself. Works even if the Moonpool server is off.
+- **IntelliBrite color commands** — sync, swim, set, hold and recall on the
+  Lights page, alongside the themes.
+- **Wall remotes** — remap iS4 / QuickTouch buttons to any circuit from
+  Settings → System.
+- **IntelliChem** — setpoints and tank levels at a glance, plus bounded,
+  audited manual acid/chlorine dosing on the Chemistry page. Chem dosers
+  and pool covers are surfaced too.
+- **Named delays** — the dashboard banner now says *what's* delaying
+  (heater cool-down, circuit start/stop), with the one-tap skip.
+- **Panel clock drift** — see what time the panel thinks it is and how far
+  it has drifted, next to the Sync-now button.
 
-### Commands are verified, not assumed
+### For reliability & support
 
-Every control command now re-reads the panel state to confirm it actually
-landed, retries once if it looks dropped, and raises an alert if the panel
-never took it. A change made by a person at the physical panel is reported,
-never fought.
+- **RS-485 bus health** — per-port traffic, collision and failure counters
+  with a "check wiring" warning. Cable trouble shows up here first.
+- **Panel-config backups** — list njsPC's own configuration backups and
+  create one with a tap.
+- **Diagnostics toolkit** — record raw RS-485 bus traffic and download it,
+  or grab a full config + state snapshot for bug reports.
 
-Scheduled one-shots are crash-safe (a job can no longer be lost by a restart
-mid-run), stale jobs missed overnight don't fire at breakfast, and failures
-are surfaced instead of buried.
+### Safety fixes
 
-### Real-deployment fixes
+- **`.env` stays in charge until you say otherwise** — saving any setting
+  used to silently freeze env-derived values (like your coordinates) into
+  the database forever. Now only the settings you explicitly change are
+  stored, the Location panel shows which source is live, and there's a
+  one-tap "use .env again".
+- **Updates can't destroy hand-edits** — the updater refuses to run over
+  locally modified files and lists them, with an explicit "update anyway"
+  or "keep my edits" choice. Nightly auto-updates always fail safe.
 
-- **Login over the LAN** — the session cookie no longer demands HTTPS, so
-  signing in at `http://<pi>:3000` works.
-- **Compose that actually starts** — njsPC is built from pinned upstream
-  source (no unofficial images), the container gets serial-port permissions
-  on Raspberry Pi OS, and a Cloudflare tunnel token is optional again.
-- **Pi provisioning scripts** — `scripts/pi-setup.sh` and `pi-deploy.sh`
-  take a fresh Pi to a running install.
-- **Hardware guidance** — measured numbers for Pi-class machines are in
-  `.env.example`; short version: run the deterministic parser on the Pi
-  (`COPILOT_FORCE_MOCK=true`) or point `COPILOT_BASE_URL` at a bigger box.
+### Simulator
 
-### Testing
-
-The copilot test corpus now asserts the exact arguments that decide what
-equipment moves and when, runs every case through the real pipeline, and
-grew from 60 to 153 passing tests.
+The simulator emulates all of it — demo IntelliChem, an iS4 remote, bus
+statistics, backups — so every feature can be demoed and tested with zero
+hardware. 157 tests.
 
 ### Install / update
 
