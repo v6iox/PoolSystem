@@ -423,6 +423,26 @@ cd ~/moonpool && git pull && docker compose up -d --build
 The database schema migrates itself on boot. History samples are pruned at 90
 days; daily rollups are kept forever and stay tiny.
 
+### Equipment-aware extras
+
+Everything njsPC can talk to has a home in Moonpool, and every section is
+capability-gated — it appears only when your panel actually reports the
+hardware: RS-485 bus health and panel-config backups (Settings → System),
+raw packet capture + diagnostics snapshot downloads for support, IntelliBrite
+color commands (sync/swim/set/hold/recall on the Lights page), panel-native
+sunrise/sunset schedule anchors, wall-remote (iS4/QuickTouch) button
+remapping, IntelliChem setpoints/tank levels with audited manual dosing,
+chem dosers, and pool covers. A system without the hardware simply never
+shows the section.
+
+**Don't hand-edit files in the install directory.** Updates check out the
+release tag over the working tree — if the updater finds local edits it
+refuses and lists them in the UI, where you can either keep them (and skip
+the update) or explicitly discard them. Changes belong in the repo:
+`scripts/pi-deploy.sh` pushes unreleased work to the Pi for testing, and a
+release ships anything permanent. The one exception is `.env` — it's
+gitignored and always survives updates.
+
 ## 16. Living with ScreenLogic during the transition
 
 First, a fact that makes this much less scary than it sounds:

@@ -148,6 +148,19 @@ function validate(action: PoolAction, ctx: ActionContext): void {
       }
       return;
     }
+    case "lightCommand": {
+      if (isGuest) throw new AdapterError("Guests cannot run light commands", 403);
+      if (action.isGroup) {
+        if (!snap.lightGroups.some((g) => g.id === action.targetId)) {
+          throw new AdapterError(`Unknown light group ${action.targetId}`, 404);
+        }
+      } else {
+        const circuit = snap.circuits.find((c) => c.id === action.targetId) ?? snap.features.find((c) => c.id === action.targetId);
+        if (!circuit) throw new AdapterError(`Unknown circuit ${action.targetId}`, 404);
+        if (!circuit.isLight) throw new AdapterError(`${circuit.name} is not a light`, 400);
+      }
+      return;
+    }
     case "runScene": {
       const scene = getScene(action.sceneId);
       if (!scene) throw new AdapterError(`Unknown scene ${action.sceneId}`, 404);
@@ -187,6 +200,14 @@ function describeTarget(action: PoolAction): string {
     case "setLightGroupTheme": {
       const g = snap.lightGroups.find((x) => x.id === action.groupId);
       return g ? g.name : `light group ${action.groupId}`;
+    }
+    case "lightCommand": {
+      if (action.isGroup) {
+        const g = snap.lightGroups.find((x) => x.id === action.targetId);
+        return g ? g.name : `light group ${action.targetId}`;
+      }
+      const c = snap.circuits.find((x) => x.id === action.targetId) ?? snap.features.find((x) => x.id === action.targetId);
+      return c ? c.name : `light ${action.targetId}`;
     }
     case "runScene": {
       const s = getScene(action.sceneId);
@@ -240,6 +261,7 @@ async function resendAction(action: PoolAction): Promise<void> {
     }
     case "runScene":
     case "setPumpSpeed":
+    case "lightCommand":
       return;
   }
 }
@@ -386,6 +408,12 @@ export async function executeAction(action: PoolAction, ctx: ActionContext): Pro
           audit({ userId: ctx.userId, userName: ctx.userName, source: ctx.source, action: action.type, target, oldValue, newValue, ok: false, detail: failed.map((f) => f.error).join("; ") });
           return { ok: false, action, summary, error: failed.map((f) => f.error).join("; ") };
         }
+        break;
+      }
+      case "lightCommand": {
+        await adapter.runLightCommand(action.targetId, action.command, action.isGroup);
+        newValue = action.command;
+        summary = `${target} → ${action.command}`;
         break;
       }
       case "allOff": {

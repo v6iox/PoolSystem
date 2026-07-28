@@ -85,7 +85,9 @@ function ScheduleRow({
           <span className="mt-0.5 block font-display text-sm tracking-tight text-ink-dim tabular-nums">
             {s.isEggTimer
               ? `Runs ${formatDuration(eggTimerDuration(s))} after turn-on`
-              : `${formatMinutes(s.startTime)} – ${formatMinutes(s.endTime)}${overnight ? " (+1 day)" : ""}`}
+              : `${s.startTimeType === "sunrise" ? "sunrise" : s.startTimeType === "sunset" ? "sunset" : formatMinutes(s.startTime)} – ${
+                  s.endTimeType === "sunrise" ? "sunrise" : s.endTimeType === "sunset" ? "sunset" : formatMinutes(s.endTime)
+                }${overnight ? " (+1 day)" : ""}`}
           </span>
           <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {!s.isEggTimer && <Chip>{formatDays(s.days)}</Chip>}

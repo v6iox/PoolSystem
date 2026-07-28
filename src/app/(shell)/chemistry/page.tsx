@@ -18,6 +18,7 @@ import { TrendSparklines } from "@/components/chemistry/trend-sparklines";
 import { HistoryTable } from "@/components/chemistry/history-table";
 import { LogTestDialog } from "@/components/chemistry/log-test-dialog";
 import { FALLBACK_RANGES, latestPerField, type ChemReading } from "@/components/chemistry/chem-shared";
+import { ChemAdvanced } from "@/components/chemistry/chem-advanced";
 import { formatRelative } from "@/lib/utils";
 
 function Section({ index, children }: { index: number; children: React.ReactNode }): React.JSX.Element {
@@ -163,6 +164,8 @@ export default function ChemistryPage(): React.JSX.Element {
           )}
         </div>
       )}
+
+      <ChemAdvanced />
 
       <LogTestDialog open={logOpen} onOpenChange={setLogOpen} />
     </div>

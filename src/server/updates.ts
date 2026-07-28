@@ -142,17 +142,29 @@ export async function getUpdaterStatus(): Promise<UpdaterStatus> {
   }
 }
 
-export async function applyUpdate(tag: string, initiatedBy: string): Promise<{ ok: boolean; error?: string }> {
+export async function applyUpdate(
+  tag: string,
+  initiatedBy: string,
+  force = false
+): Promise<{ ok: boolean; error?: string; localEdits?: string[] }> {
   if (!UPDATER_URL) return { ok: false, error: "Updater sidecar not available (dev mode or old install — run install.sh --update)" };
   try {
     const res = await fetch(`${UPDATER_URL}/update`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${UPDATER_TOKEN}` },
-      body: JSON.stringify({ ref: tag }),
+      body: JSON.stringify({ ref: tag, force }),
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      const body = (await res.json().catch(() => ({}))) as { error?: string; files?: string[] };
+      if (Array.isArray(body.files) && body.files.length > 0) {
+        // Hand-edits on the Pi would be destroyed — refuse and surface them.
+        return {
+          ok: false,
+          error: "Local edits in the install would be lost by this update.",
+          localEdits: body.files,
+        };
+      }
       return { ok: false, error: body.error ?? `updater returned ${res.status}` };
     }
     saveState({ lastAppliedTag: tag, lastAppliedAt: Date.now() });

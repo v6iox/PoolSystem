@@ -72,10 +72,16 @@ interface SimSchedule {
   endTime: number;
   days: number[];
   scheduleType: "repeat" | "runonce";
+  startTimeType?: "manual" | "sunrise" | "sunset";
+  endTimeType?: "manual" | "sunrise" | "sunset";
   heatSetpoint: number | null;
   heatSource: string | null;
   disabled: boolean;
 }
+
+/** Simulated sun times: sunrise 6:30, sunset 8:30 PM. */
+const SIM_SUNRISE = 6 * 60 + 30;
+const SIM_SUNSET = 20 * 60 + 30;
 
 const TICK_MS = 3000;
 
@@ -155,6 +161,21 @@ export class MockAdapter implements PoolAdapter {
     { id: 1, name: "Intake", typeName: "standard", circuitId: 1 as number | null },
     { id: 2, name: "Return", typeName: "standard", circuitId: 1 as number | null },
   ];
+  private backupsList = [{ name: "moonpool-2026-07-20.zip", at: Date.now() - 8 * 86400_000, sizeKb: 42 }];
+  private remote = {
+    id: 1,
+    name: "Spa-side iS4",
+    typeName: "is4",
+    buttons: [
+      { slot: 1, circuitId: 1 as number | null },
+      { slot: 2, circuitId: 2 as number | null },
+      { slot: 3, circuitId: 3 as number | null },
+      { slot: 4, circuitId: 7 as number | null },
+    ],
+  };
+  private capturing = false;
+  /** Demo IntelliChem so chem surfaces are testable with zero hardware. */
+  private intellichem = { id: 1, ph: 7.52, orp: 704, phSetpoint: 7.5, orpSetpoint: 700, phTank: 5, orpTank: 6 };
 
   async start(): Promise<void> {
     if (this.timer) return;
@@ -246,11 +267,14 @@ export class MockAdapter implements PoolAdapter {
       id: s.id,
       circuitId: s.circuitId,
       circuitName: this.circuitById(s.circuitId)?.name ?? `Circuit ${s.circuitId}`,
-      startTime: s.startTime,
-      endTime: s.endTime,
+      // Sun-anchored schedules report the panel-resolved time of day.
+      startTime: s.startTimeType === "sunrise" ? SIM_SUNRISE : s.startTimeType === "sunset" ? SIM_SUNSET : s.startTime,
+      endTime: s.endTimeType === "sunrise" ? SIM_SUNRISE : s.endTimeType === "sunset" ? SIM_SUNSET : s.endTime,
       days: s.days,
       scheduleType: s.scheduleType,
       isEggTimer: false,
+      startTimeType: s.startTimeType ?? "manual",
+      endTimeType: s.endTimeType ?? "manual",
       heatSetpoint: s.heatSetpoint,
       heatSource: s.heatSource,
       disabled: s.disabled,
@@ -276,7 +300,20 @@ export class MockAdapter implements PoolAdapter {
       lightGroups: [{ ...this.lightGroup, isOn: this.lightGroup.circuitIds.some((id) => this.circuitById(id)?.isOn) }],
       lightThemes: INTELLIBRITE_THEMES,
       schedules,
-      chem: [],
+      chem: [
+        {
+          id: this.intellichem.id,
+          name: "IntelliChem",
+          bodyId: 1,
+          ph: Math.round(this.intellichem.ph * 100) / 100,
+          orp: Math.round(this.intellichem.orp),
+          phSetpoint: this.intellichem.phSetpoint,
+          orpSetpoint: this.intellichem.orpSetpoint,
+          phDosing: "monitoring",
+          orpDosing: "monitoring",
+          alarms: [],
+        },
+      ],
       equipment: { model: "EasyTouch2 8", controllerType: "easytouch", softwareVersion: "2.180 (simulated)" },
     };
   }
@@ -369,6 +406,8 @@ export class MockAdapter implements PoolAdapter {
       existing.endTime = input.endTime;
       existing.days = input.days;
       existing.scheduleType = input.scheduleType;
+      existing.startTimeType = input.startTimeType ?? "manual";
+      existing.endTimeType = input.endTimeType ?? "manual";
       existing.heatSetpoint = input.heatSetpoint ?? null;
       existing.heatSource = input.heatSource ?? null;
     } else {
@@ -379,6 +418,8 @@ export class MockAdapter implements PoolAdapter {
         endTime: input.endTime,
         days: input.days,
         scheduleType: input.scheduleType,
+        startTimeType: input.startTimeType ?? "manual",
+        endTimeType: input.endTimeType ?? "manual",
         heatSetpoint: input.heatSetpoint ?? null,
         heatSource: input.heatSource ?? null,
         disabled: false,
@@ -448,8 +489,88 @@ export class MockAdapter implements PoolAdapter {
       lightCircuitIds: this.circuits.filter((c) => c.isLight).map((c) => c.id),
       heaters: [{ id: 1, name: "Gas Heater", typeName: "gas", bodyDesc: "Pool & Spa", coolingEnabled: null }],
       valves: this.valves.map((v) => ({ ...v, circuitName: v.circuitId !== null ? name(v.circuitId) : "" })),
-      clock: { source: "server", mode: "12h", serverTime: new Date().toISOString() },
+      clock: { source: "server", mode: "12h", serverTime: new Date().toISOString(), panelTime: new Date().toISOString() },
+      rs485: [{ port: "/dev/ttyUSB0 (simulated)", status: "open", sent: 48211, received: 47990, collisions: 3, failed: 0 }],
+      backups: [...this.backupsList],
+      chemControllers: [
+        {
+          id: this.intellichem.id,
+          name: "IntelliChem",
+          typeName: "intellichem",
+          bodyDesc: "Pool",
+          phSetpoint: this.intellichem.phSetpoint,
+          orpSetpoint: this.intellichem.orpSetpoint,
+          phTankLevel: this.intellichem.phTank,
+          orpTankLevel: this.intellichem.orpTank,
+        },
+      ],
+      chemDosers: [],
+      covers: [],
+      remotes: [
+        {
+          id: this.remote.id,
+          name: this.remote.name,
+          typeName: this.remote.typeName,
+          buttons: this.remote.buttons.map((b) => ({
+            slot: b.slot,
+            circuitId: b.circuitId,
+            circuitName: b.circuitId !== null ? name(b.circuitId) : "—",
+          })),
+        },
+      ],
+      virtualEquipment: [],
     };
+  }
+
+  async runLightCommand(targetId: number, command: string, isGroup: boolean): Promise<void> {
+    const known = isGroup
+      ? targetId === this.lightGroup.id
+      : this.circuitById(targetId)?.isLight === true;
+    if (!known) throw new AdapterError(`Unknown light ${isGroup ? "group" : "circuit"} ${targetId}`, 404);
+    void command; // the simulator has no bus — accepting is the demo
+    this.emit();
+  }
+
+  async createNjspcBackup(): Promise<void> {
+    this.backupsList.unshift({
+      name: `moonpool-${new Date().toISOString().slice(0, 10)}.zip`,
+      at: Date.now(),
+      sizeKb: 40 + Math.round(Math.random() * 8),
+    });
+    this.backupsList = this.backupsList.slice(0, 10);
+  }
+
+  async setRemoteButtons(id: number, buttons: Array<{ slot: number; circuitId: number }>): Promise<void> {
+    if (id !== this.remote.id) throw new AdapterError(`Unknown remote ${id}`, 404);
+    for (const b of buttons) {
+      const slot = this.remote.buttons.find((x) => x.slot === b.slot);
+      if (slot && this.circuitById(b.circuitId)) slot.circuitId = b.circuitId;
+    }
+    this.emit();
+  }
+
+  async chemFeed(controllerId: number, kind: "ph" | "orp", seconds: number): Promise<void> {
+    if (controllerId !== this.intellichem.id) throw new AdapterError(`Unknown chem controller ${controllerId}`, 404);
+    // Nudge the simulated reading so the manual dose visibly does something.
+    if (kind === "ph") this.intellichem.ph = Math.max(7.2, this.intellichem.ph - 0.02 * (seconds / 10));
+    else this.intellichem.orp = Math.min(800, this.intellichem.orp + 2 * (seconds / 10));
+    this.emit();
+  }
+
+  async startPacketCapture(): Promise<void> {
+    this.capturing = true;
+  }
+
+  async stopPacketCapture(): Promise<{ filename: string; content: string }> {
+    this.capturing = false;
+    return {
+      filename: `njspc-capture-simulated.json`,
+      content: JSON.stringify({ simulated: true, note: "The simulator has no RS-485 bus; this is a placeholder capture." }, null, 2),
+    };
+  }
+
+  async getDiagnostics(): Promise<unknown> {
+    return { simulated: true, snapshot: this.getSnapshot(), advanced: await this.getAdvancedOptions() };
   }
 
   async setCircuitConfig(input: CircuitConfigInput): Promise<void> {

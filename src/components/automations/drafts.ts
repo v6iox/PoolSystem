@@ -208,6 +208,11 @@ export function actionToDraft(action: PoolAction): ActionDraft {
       return { kind: "lightTheme", target: `g:${action.groupId}`, theme: String(action.theme) };
     case "runScene":
       return { kind: "runScene", sceneId: String(action.sceneId) };
+    // Light commands can't be authored by this editor and never appear in
+    // stored automations today; degrade to a harmless theme draft on the same
+    // target rather than crashing the edit dialog.
+    case "lightCommand":
+      return { kind: "lightTheme", target: `${action.isGroup ? "g" : "c"}:${action.targetId}`, theme: "" };
     case "allOff":
       return { kind: "allOff" };
   }

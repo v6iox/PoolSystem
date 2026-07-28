@@ -201,7 +201,24 @@ export function SystemAdvanced(): React.JSX.Element | null {
       <SettingRow
         icon={<Clock3 size={16} />}
         label="Panel clock"
-        hint={`Clock source: ${advanced.clock.source} · ${advanced.clock.mode !== "unknown" ? `${advanced.clock.mode} display · ` : ""}server time ${formatClock(Date.parse(advanced.clock.serverTime))}`}
+        hint={(() => {
+          const serverMs = Date.parse(advanced.clock.serverTime);
+          const panelMs = advanced.clock.panelTime ? Date.parse(advanced.clock.panelTime) : NaN;
+          const parts: string[] = [];
+          if (Number.isFinite(panelMs)) {
+            const driftMin = Math.round((panelMs - serverMs) / 60_000);
+            parts.push(`panel thinks it's ${formatClock(panelMs)}`);
+            parts.push(
+              driftMin === 0
+                ? "in sync with the server"
+                : `${Math.abs(driftMin)} min ${driftMin > 0 ? "ahead" : "behind"} — schedules fire at panel time`
+            );
+          } else {
+            parts.push(`server time ${formatClock(serverMs)}`);
+          }
+          parts.push(`source: ${advanced.clock.source}`);
+          return parts.join(" · ");
+        })()}
       >
         <Button
           variant="glass"
@@ -241,11 +258,14 @@ export function DelayBanner(): React.JSX.Element | null {
   const { send } = useAdvanced();
   const [busy, setBusy] = useState(false);
   if (!snapshot.delay || user.role === "guest") return null;
+  const detail = (snapshot.delays ?? []).filter(Boolean).join(", ");
   return (
     <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-warn/25 bg-warn/10 px-3 py-2 text-sm text-warn">
       <span className="flex items-center gap-2">
         <Clock3 size={15} className="shrink-0" />
-        The panel is in a delay (heater cool-down or valve turn) — some circuits are briefly locked.
+        {detail
+          ? `Panel delay active: ${detail} — some circuits are briefly locked.`
+          : "The panel is in a delay (heater cool-down or valve turn) — some circuits are briefly locked."}
       </span>
       <Button
         variant="ghost"

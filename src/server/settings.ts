@@ -72,8 +72,24 @@ export function getAppSettings(): AppSettings {
   return { ...DEFAULT_SETTINGS, ...stored, idealRanges: { ...DEFAULT_SETTINGS.idealRanges, ...(stored.idealRanges ?? {}) } };
 }
 
-export function saveAppSettings(patch: Partial<AppSettings>): AppSettings {
-  const merged = { ...getAppSettings(), ...patch };
-  setSetting("app", merged);
-  return merged;
+/** A patch value of null deletes the stored key → env/default is authoritative again. */
+export type AppSettingsPatch = { [K in keyof AppSettings]?: AppSettings[K] | null };
+
+/** Keys the owner has explicitly saved (these override env/defaults). */
+export function storedAppKeys(): Array<keyof AppSettings> {
+  return Object.keys(getSetting<Partial<AppSettings>>("app", {})) as Array<keyof AppSettings>;
+}
+
+export function saveAppSettings(patch: AppSettingsPatch): AppSettings {
+  // Store ONLY the keys the owner explicitly set. Persisting the whole merged
+  // object would freeze env-derived values (POOL_LATITUDE etc.) into the DB
+  // the first time ANY setting is saved — after which .env silently stops
+  // mattering. Saving the clock format must not adopt the location.
+  const stored = getSetting<Record<string, unknown>>("app", {});
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) delete stored[key];
+    else if (value !== undefined) stored[key] = value;
+  }
+  setSetting("app", stored);
+  return getAppSettings();
 }

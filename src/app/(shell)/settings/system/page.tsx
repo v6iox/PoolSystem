@@ -27,6 +27,13 @@ import {
 import { DetectedEquipment } from "@/components/settings/detected-equipment";
 import { ServerHealth } from "@/components/settings/server-health";
 import { UpdatesSection } from "@/components/settings/updates-section";
+import {
+  BusHealthSection,
+  CoversAndVirtualSection,
+  DiagnosticsSection,
+  PanelBackupsSection,
+  RemotesSection,
+} from "@/components/advanced/system-extras";
 import { roleAtLeast } from "@/types/auth";
 import { formatRelative } from "@/lib/utils";
 
@@ -177,6 +184,16 @@ export default function SystemSettingsPage(): React.JSX.Element {
             </Panel>
 
             <ServerHealth />
+
+            <BusHealthSection />
+
+            <PanelBackupsSection />
+
+            <CoversAndVirtualSection />
+
+            <DiagnosticsSection />
+
+            <RemotesSection />
 
             <SystemAdvanced />
           </>

@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { AutomationDef, AutomationTrigger, PoolAction, PoolEventKind, SceneDef } from "@/types/actions";
+import { LIGHT_COMMAND_LABELS } from "@/types/actions";
 import type { PoolStateSnapshot } from "@/types/pool";
 import { formatDays, formatMinutes } from "@/lib/utils";
 
@@ -180,6 +181,8 @@ export function describeAction(
       const scene = scenes?.find((s) => s.id === action.sceneId);
       return `Run scene “${scene?.name ?? `#${action.sceneId}`}”`;
     }
+    case "lightCommand":
+      return `${action.isGroup ? snapshot.lightGroups.find((g) => g.id === action.targetId)?.name ?? `Light group ${action.targetId}` : circuitName(snapshot, action.targetId)} → ${LIGHT_COMMAND_LABELS[action.command] ?? action.command}`;
     case "allOff":
       return "Turn everything off";
   }

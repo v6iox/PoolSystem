@@ -5,8 +5,12 @@
  * have: the Docker socket and the source checkout. It does exactly one
  * thing on request: check out a release tag and rebuild the web container.
  *
- *   GET  /status          → { busy, log, ref }
- *   POST /update {ref}    → 202, then: git fetch → checkout ref → compose build web → up -d web
+ *   GET  /status                 → { busy, log, ref }
+ *   POST /update {ref, force?}   → 202, then: git fetch → checkout ref → compose build web → up -d web
+ *
+ * The checkout is forced, which would silently destroy hand-edits made on the
+ * Pi — so a dirty tracked tree refuses with 409 + the file list unless the
+ * request says force:true. (.env and other untracked files always survive.)
  *
  * Reachable only on the internal compose network; every request must carry
  * Authorization: Bearer <UPDATER_TOKEN> (wired to AUTH_SECRET in compose).
@@ -63,11 +67,23 @@ async function composeArgs() {
   return args;
 }
 
-async function applyUpdate(ref) {
+/** Tracked files with local modifications — what `checkout -f` would destroy. */
+async function localEdits() {
+  await run("git", ["config", "--global", "--add", "safe.directory", WORKSPACE], { cwd: "/" });
+  const out = await run("git", ["status", "--porcelain"]);
+  return out
+    .split("\n")
+    .filter((line) => line.trim() && !line.startsWith("??") && !line.startsWith("!!"))
+    .map((line) => line.slice(3).trim())
+    .filter(Boolean);
+}
+
+async function applyUpdate(ref, force) {
   busy = true;
   currentRef = ref;
   try {
     await run("git", ["config", "--global", "--add", "safe.directory", WORKSPACE], { cwd: "/" });
+    if (force) addLog("force=true — discarding local edits in /workspace");
     await run("git", ["fetch", "--force", "--tags", "origin"]);
     await run("git", ["checkout", "-f", ref]);
     const compose = await composeArgs();
@@ -102,25 +118,45 @@ const server = http.createServer((req, res) => {
       if (body.length > 10_000) req.destroy();
     });
     req.on("end", () => {
-      let ref = "";
-      try {
-        ref = String(JSON.parse(body).ref ?? "");
-      } catch {
-        /* fall through */
-      }
-      if (!/^[\w./-]{1,80}$/.test(ref)) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "bad ref" }));
-        return;
-      }
-      if (busy) {
-        res.writeHead(409, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "update already running" }));
-        return;
-      }
-      void applyUpdate(ref);
-      res.writeHead(202, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, ref }));
+      void (async () => {
+        let ref = "";
+        let force = false;
+        try {
+          const parsed = JSON.parse(body);
+          ref = String(parsed.ref ?? "");
+          force = parsed.force === true;
+        } catch {
+          /* fall through */
+        }
+        if (!/^[\w./-]{1,80}$/.test(ref)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "bad ref" }));
+          return;
+        }
+        if (busy) {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "update already running" }));
+          return;
+        }
+        if (!force) {
+          // Refuse rather than destroy: hand-edits in /workspace would be
+          // wiped by the forced checkout. .env is untracked and always safe.
+          try {
+            const edits = await localEdits();
+            if (edits.length > 0) {
+              addLog(`refusing update: local edits present (${edits.slice(0, 5).join(", ")}${edits.length > 5 ? "…" : ""})`);
+              res.writeHead(409, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: "local edits would be destroyed", files: edits.slice(0, 20) }));
+              return;
+            }
+          } catch (err) {
+            addLog(`dirty-tree check failed (${err.message}) — proceeding`);
+          }
+        }
+        void applyUpdate(ref, force);
+        res.writeHead(202, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, ref }));
+      })();
     });
     return;
   }

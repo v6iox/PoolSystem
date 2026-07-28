@@ -17,6 +17,8 @@ import { SettingRow, SettingsSection, Segmented } from "@/components/settings/se
 
 interface AppSettingsResponse {
   settings: AppSettings;
+  /** Keys explicitly saved in the UI — these override .env / defaults. */
+  storedKeys?: string[];
 }
 
 function NumberCell({
@@ -85,7 +87,7 @@ export function UnitsSection(): React.JSX.Element | null {
   // Guests can't read app settings; the hub also hides this section for them.
   if (user.role === "guest") return null;
 
-  const save = (patch: Partial<AppSettings>): void => {
+  const save = (patch: Partial<Record<keyof AppSettings, unknown>>): void => {
     void apiSend<AppSettingsResponse>("PUT", "/api/settings/app", patch)
       .then((res) => {
         queryClient.setQueryData(["app-settings"], res);
@@ -97,6 +99,7 @@ export function UnitsSection(): React.JSX.Element | null {
   };
 
   const settings = data?.settings;
+  const locationSaved = (data?.storedKeys ?? []).some((k) => k === "latitude" || k === "longitude");
 
   return (
     <SettingsSection
@@ -169,7 +172,11 @@ export function UnitsSection(): React.JSX.Element | null {
           <SettingRow
             icon={<MapPin size={17} />}
             label="Location"
-            hint="Drives weather, sunrise & sunset automations"
+            hint={
+              locationSaved
+                ? "Saved here — this overrides POOL_LATITUDE / POOL_LONGITUDE in .env"
+                : "Currently from .env (or defaults) — editing here takes over"
+            }
             stacked
           >
             <div className="grid grid-cols-2 gap-3">
@@ -188,6 +195,15 @@ export function UnitsSection(): React.JSX.Element | null {
                 onSave={(longitude) => save({ longitude })}
               />
             </div>
+            {editable && locationSaved && (
+              <button
+                type="button"
+                onClick={() => save({ latitude: null, longitude: null })}
+                className="mt-2 self-start text-xs font-medium text-accent hover:underline"
+              >
+                Forget saved location — use .env again
+              </button>
+            )}
           </SettingRow>
         </>
       )}

@@ -67,11 +67,29 @@ export function UpdatesSection(): React.JSX.Element {
     }
   };
 
-  const applyNow = async (): Promise<void> => {
+  const [localEdits, setLocalEdits] = useState<string[] | null>(null);
+
+  const applyNow = async (force = false): Promise<void> => {
     if (!info?.state.latestTag) return;
     setUpdating(true);
+    setLocalEdits(null);
     try {
-      await apiSend("POST", "/api/updates/apply", { tag: info.state.latestTag });
+      const res = await fetch("/api/updates/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag: info.state.latestTag, force }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; localEdits?: string[] };
+        if (Array.isArray(body.localEdits) && body.localEdits.length > 0) {
+          // Hand-edits on the install would be wiped — show them and let the
+          // owner decide instead of destroying silently.
+          setLocalEdits(body.localEdits);
+          setUpdating(false);
+          return;
+        }
+        throw new Error(body.error ?? `Update failed (${res.status})`);
+      }
       toast("info", `Updating to ${info.state.latestTag}…`, "Moonpool rebuilds and restarts itself — this page will reconnect.");
       // The web container is about to be replaced; poll until it's back, then reload.
       const poll = window.setInterval(() => {
@@ -153,6 +171,33 @@ export function UpdatesSection(): React.JSX.Element {
             )}
           </div>
         </div>
+
+        {localEdits && (
+          <div className="mt-3 rounded-xl border border-warn/30 bg-warn/10 p-3">
+            <p className="text-xs font-medium text-warn">
+              This install has hand-edited files that the update would erase:
+            </p>
+            <ul className="mt-1.5 space-y-0.5">
+              {localEdits.map((f) => (
+                <li key={f} className="font-mono text-[11px] text-ink-dim">
+                  {f}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11px] text-ink-faint">
+              Changes belong in the repo (use scripts/pi-deploy.sh for testing); .env always survives. Updating anyway
+              discards the edits above permanently.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <Button variant="ghost" size="sm" onClick={() => void applyNow(true)}>
+                Update anyway — discard those edits
+              </Button>
+              <Button variant="glass" size="sm" onClick={() => setLocalEdits(null)}>
+                Keep my edits
+              </Button>
+            </div>
+          </div>
+        )}
 
         {busy && (
           <div className="mt-3 max-h-40 overflow-y-auto rounded-xl border border-accent/25 bg-abyss/50 p-3">

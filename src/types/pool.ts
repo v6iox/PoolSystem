@@ -112,6 +112,8 @@ export interface LightGroupState {
 /** Minutes from midnight, local panel time. */
 export type MinutesOfDay = number;
 
+export type ScheduleAnchor = "manual" | "sunrise" | "sunset";
+
 export interface ScheduleState {
   id: number;
   circuitId: number;
@@ -123,6 +125,9 @@ export interface ScheduleState {
   scheduleType: "repeat" | "runonce";
   /** Egg timer style schedules report no fixed start. */
   isEggTimer: boolean;
+  /** Panel-native sun anchoring: the panel recomputes the time daily. */
+  startTimeType?: ScheduleAnchor;
+  endTimeType?: ScheduleAnchor;
   heatSetpoint: number | null;
   heatSource: string | null;
   disabled: boolean;
@@ -164,6 +169,8 @@ export interface PoolStateSnapshot {
   freezeProtect: boolean;
   /** Heater/valve delay currently active. */
   delay: boolean;
+  /** Human descriptions of the active delays ("heater cool-down", "valve rotation"). */
+  delays?: string[];
   panelMode: PanelMode;
   bodies: BodyState[];
   circuits: CircuitState[];
@@ -186,6 +193,9 @@ export interface ScheduleInput {
   endTime: MinutesOfDay;
   days: number[];
   scheduleType: "repeat" | "runonce";
+  /** Panel-native sun anchoring; when set, the matching time is advisory. */
+  startTimeType?: ScheduleAnchor;
+  endTimeType?: ScheduleAnchor;
   heatSetpoint?: number | null;
   heatSource?: string | null;
 }
