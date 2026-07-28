@@ -5,6 +5,7 @@ import { usePool } from "@/lib/client/pool-state";
 import { roleAtLeast } from "@/types/auth";
 import { EmptyState, PageHeader, Skeleton } from "@/components/ui/panel";
 import { HeatBodyPanel } from "@/components/circuits/heat-body-panel";
+import { HeatAdvanced } from "@/components/advanced/panels";
 import { cn } from "@/lib/utils";
 
 export default function HeatPage(): React.JSX.Element {
@@ -59,6 +60,8 @@ export default function HeatPage(): React.JSX.Element {
           ))}
         </div>
       )}
+
+      <HeatAdvanced />
     </div>
   );
 }

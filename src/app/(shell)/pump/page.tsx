@@ -5,6 +5,7 @@ import { Fan } from "lucide-react";
 import { usePool } from "@/lib/client/pool-state";
 import { PageHeader, EmptyState, Skeleton } from "@/components/ui/panel";
 import { PumpCard } from "@/components/pump/pump-card";
+import { PumpAdvanced } from "@/components/advanced/panels";
 import { cn } from "@/lib/utils";
 
 export default function PumpPage(): React.JSX.Element {
@@ -54,6 +55,8 @@ export default function PumpPage(): React.JSX.Element {
           ))}
         </div>
       )}
+
+      <PumpAdvanced />
     </div>
   );
 }

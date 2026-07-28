@@ -34,6 +34,7 @@ import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { CircuitIcon } from "@/lib/icons";
+import { TempestBadge } from "@/components/widgets/tempest-badge";
 import { cn, formatMinutes, formatRelative, DAY_LABELS } from "@/lib/utils";
 import type { CircuitState } from "@/types/pool";
 import type { WeatherData } from "@/types/weather";
@@ -334,7 +335,7 @@ export function WeatherWidget(): React.JSX.Element {
   const useC = snapshot.units === "C";
   const fromTempest = w?.source === "tempest";
   return (
-    <WidgetFrame title={fromTempest ? "Weather · Tempest" : "Weather"}>
+    <WidgetFrame title="Weather" action={fromTempest ? <TempestBadge observedAt={w?.fetchedAt} /> : undefined}>
       {w ? (
         <div className="flex h-full flex-col justify-between gap-1.5">
           <div className="flex items-center justify-between gap-2">

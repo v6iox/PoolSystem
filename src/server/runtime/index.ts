@@ -152,7 +152,28 @@ export class Runtime {
     for (const cb of this.listeners) cb(decorated);
   }
 
-  private decorate(snap: PoolStateSnapshot): PoolStateSnapshot {
+  /** value+timestamp per sensor, so "reading changed Xm ago" survives quiet periods */
+  private tempSeen = new Map<string, { value: number; at: number }>();
+
+  /** Stamp each temp reading with when its VALUE last changed (staleness signal). */
+  private stampTempFreshness(snap: PoolStateSnapshot): PoolStateSnapshot {
+    const stamp = (key: string, value: number | null): number | null => {
+      if (value === null) return null;
+      const prev = this.tempSeen.get(key);
+      if (prev && prev.value === value) return prev.at;
+      const at = now();
+      this.tempSeen.set(key, { value, at });
+      return at;
+    };
+    return {
+      ...snap,
+      airTempChangedAt: stamp("air", snap.airTemp),
+      bodies: snap.bodies.map((b) => ({ ...b, tempChangedAt: stamp(`body:${b.id}`, b.temp) })),
+    };
+  }
+
+  private decorate(rawSnap: PoolStateSnapshot): PoolStateSnapshot {
+    const snap = this.stampTempFreshness(rawSnap);
     const meta = this.circuitMeta();
     const bodyMeta = this.bodyMeta();
     if (meta.size === 0 && bodyMeta.size === 0) return snap;

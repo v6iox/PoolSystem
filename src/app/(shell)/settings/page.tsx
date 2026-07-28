@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { AppearanceSection } from "@/components/settings/appearance-section";
 import { UnitsSection } from "@/components/settings/units-section";
 import { NotificationsSection } from "@/components/settings/notifications-section";
+import { CalibrationSection } from "@/components/settings/calibration-section";
 import { SettingsLinkCard } from "@/components/settings/section";
 
 export default function SettingsPage(): React.JSX.Element {
@@ -82,6 +83,12 @@ export default function SettingsPage(): React.JSX.Element {
           <NotificationsSection />
         </motion.div>
 
+        {isOwner && (
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+            <CalibrationSection />
+          </motion.div>
+        )}
+
         <section>
           <h2 className="mb-2 px-1 text-[11px] font-semibold tracking-[0.14em] text-ink-faint uppercase">
             More
@@ -106,7 +113,7 @@ export default function SettingsPage(): React.JSX.Element {
               Sign out
             </Button>
           </Panel>
-          <p className="mt-3 text-center text-[11px] text-ink-faint">Moonpool 1.0.0</p>
+          <p className="mt-3 text-center text-[11px] text-ink-faint">Moonpool {process.env.NEXT_PUBLIC_APP_VERSION ?? "dev"}</p>
         </motion.div>
       </div>
     </div>

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { usePool } from "@/lib/client/pool-state";
 import { PageHeader, Panel, Skeleton } from "@/components/ui/panel";
+import { SystemAdvanced } from "@/components/advanced/panels";
 import {
   SettingRow,
   SettingsSection,
@@ -24,13 +25,14 @@ import {
   type PillTone,
 } from "@/components/settings/section";
 import { DetectedEquipment } from "@/components/settings/detected-equipment";
+import { ServerHealth } from "@/components/settings/server-health";
 import { UpdatesSection } from "@/components/settings/updates-section";
 import { roleAtLeast } from "@/types/auth";
 import { formatRelative } from "@/lib/utils";
 
 /** Read-only system status: connection, panel state, equipment identity, versions. */
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "dev";
 
 function ValueText({ children }: { children: React.ReactNode }): React.JSX.Element {
   return <span className="text-sm text-ink-dim">{children}</span>;
@@ -173,6 +175,10 @@ export default function SystemSettingsPage(): React.JSX.Element {
               the RS-485 link dropped — Moonpool reconnects automatically and re-enables controls the
               moment state starts flowing again.
             </Panel>
+
+            <ServerHealth />
+
+            <SystemAdvanced />
           </>
         )}
       </div>

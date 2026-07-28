@@ -11,7 +11,7 @@ import { TempDial } from "@/components/pool/temp-dial";
 import { useAdvisoryGate } from "@/components/pool/advisory-gate";
 import { HeatModePicker } from "./heat-mode-picker";
 import { patchCircuitWithBody } from "./optimistic";
-import { cn } from "@/lib/utils";
+import { cn, formatRelative } from "@/lib/utils";
 
 const STATUS_VERB: Record<BodyState["heatStatus"], string> = {
   off: "",
@@ -109,6 +109,10 @@ export function HeatBodyPanel({ body, index }: { body: BodyState; index: number 
               : undefined
           }
         />
+
+        {body.temp !== null && typeof body.tempChangedAt === "number" && (
+          <p className="mb-1 text-[11px] text-ink-faint/70">reading updated {formatRelative(body.tempChangedAt)}</p>
+        )}
 
         {/* Status chips — fixed min height so appearing/disappearing doesn't jump the layout. */}
         <div className="flex min-h-7 flex-wrap items-center justify-center gap-2">
