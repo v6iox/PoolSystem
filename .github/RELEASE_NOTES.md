@@ -1,28 +1,46 @@
-## Moonpool v1.0.9 🌙
+## Moonpool v1.0.10 🌙
 
-Bugfix release for a highly visible false alarm on real EasyTouch panels. If
-you're on v1.0.8 with auto-update enabled, this one installs itself.
+Three fixes straight from real-hardware feedback. If you're on v1.0.9 with
+auto-update enabled, this one installs itself.
 
 ### Fixed
 
-- **Phantom permanent "panel is in a delay" banner** — EasyTouch reports its
-  delay status byte as 32 + flags, and **32 alone is the panel's normal
-  "no delay" state**. Moonpool read any nonzero value as an active delay, so
-  healthy panels showed the delay banner forever, and *Skip delay* only won
-  for a second or two before the panel's next status packet brought it back.
-  The parser now trusts njsPC's own naming (anything but "nodelay" is real)
-  and knows 0 and 32 both mean idle.
-- **Heater watchdog un-muzzled** — stopped-mid-heat alerts are suppressed
-  during a genuine delay (a heater cool-down legitimately pauses heating),
-  so the stuck flag was silently disabling that protection on real panels.
-  Fixed as a direct consequence of the above.
+- **Temperature calibration actually works** — on EasyTouch/IntelliTouch/
+  IntelliCenter panels, njsPC only *stores* sensor offsets without ever
+  applying them (and Pentair's protocol has no remote-calibration command),
+  so the offsets in Settings changed nothing. Moonpool now applies them
+  itself: set +2 on water and every dial, chart, automation, alert and
+  copilot answer shifts by +2 within a second. Standalone/Nixie controllers
+  keep true write-through, where njsPC-side calibration genuinely works.
+- **Idle bodies no longer show a remembered temp as live** — with the pump
+  off the sensor isn't in the water flow, so the panel just repeats its last
+  reading. Those now show **—** with a "no live reading — pump off (last
+  N°)" note instead, the copilot says so too, and history charts skip the
+  stale samples instead of drawing fake flat lines.
+- **The update progress bar moves for real** — build output was collected
+  only when the build *finished*, so the bar sat still and then jumped to
+  done. The updater now streams the build log live and paces the bar through
+  the whole build, trickling forward even during the long npm/Next steps.
 
 ### Changed
 
-- **Real delays now say what they are** — when a delay actually is active,
-  the banner names it ("Heater Cooldown Delay", "Valve Delay", "Freeze
-  Delay") instead of generic text, and per-body heater cool-down /
-  start / stop delay flags from njsPC are surfaced too.
+- **Calibration explains itself** — the Settings section now states who
+  applies the offsets, that the panel's own screen can only be calibrated at
+  the panel, and warns against setting the same correction in both places.
+- **The updater keeps itself up to date** — after each successful update the
+  sidecar rebuilds its own image and recreates itself when it changed, so
+  updater improvements reach existing installs automatically.
+
+### One-time step for existing installs
+
+The currently-running updater sidecar predates its self-refresh, so run this
+once on the Pi after updating (or just re-run the installer):
+
+```bash
+docker compose build updater && docker compose up -d updater
+```
+
+Every update after that keeps the sidecar current automatically.
 
 ### Install / update
 
