@@ -1,6 +1,7 @@
 import cron, { type ScheduledTask } from "node-cron";
 import SunCalc from "suncalc";
 import { getDb, now } from "@/server/db";
+import { sendAlert } from "@/server/push";
 import { getAppSettings } from "@/server/settings";
 import { executeActions, automationCtx } from "@/server/control";
 import type { Runtime } from "@/server/runtime";
@@ -191,13 +192,69 @@ function evaluateSnapshotTriggers(state: WorkerState, snap: PoolStateSnapshot): 
   }
 }
 
+/**
+ * How late a one-shot may run and still be worth running. Without a floor, a
+ * Pi that was off overnight comes back and fires last night's "heat the spa"
+ * at breakfast. Override with SCHEDULE_GRACE_MINUTES.
+ */
+const GRACE_MS = (Number(process.env.SCHEDULE_GRACE_MINUTES ?? "") || 30) * 60_000;
+
+/**
+ * Whether a due job is still worth running, or so late that firing it would
+ * surprise the user more than skipping it would.
+ */
+export function isTooLate(fireAt: number, at: number, graceMs: number = GRACE_MS): boolean {
+  return at - fireAt > graceMs;
+}
+
+/**
+ * Jobs are claimed by stamping executed_at, which doubles as the crash marker:
+ * a row still 'pending' with executed_at set means the process died mid-run.
+ * (executed_at rather than a new status only because the existing CHECK
+ * constraint on status can't be widened without rebuilding the table on
+ * someone's live Pi.)
+ */
+export function sweepInterruptedJobs(): void {
+  const db = getDb();
+  const stuck = db
+    .prepare("UPDATE scheduled_jobs SET status = 'error', result = ? WHERE status = 'pending' AND executed_at IS NOT NULL")
+    .run("interrupted by a restart — not run");
+  if (stuck.changes > 0) {
+    console.warn(`[moonpool] ${stuck.changes} scheduled job(s) were interrupted by a restart`);
+  }
+}
+
 async function pollScheduledJobs(): Promise<void> {
   const db = getDb();
+  const at = now();
   const due = db
-    .prepare("SELECT * FROM scheduled_jobs WHERE status = 'pending' AND fire_at <= ?")
-    .all(now()) as Array<{ id: number; label: string; actions: string; source: string }>;
+    .prepare("SELECT * FROM scheduled_jobs WHERE status = 'pending' AND executed_at IS NULL AND fire_at <= ? ORDER BY fire_at")
+    .all(at) as Array<{ id: number; label: string; actions: string; source: string; fire_at: number }>;
+
   for (const job of due) {
-    db.prepare("UPDATE scheduled_jobs SET status = 'done', executed_at = ? WHERE id = ?").run(now(), job.id);
+    // Claim it. The WHERE guard makes this atomic against a second poll tick
+    // (or a second Node process on the same file) picking up the same row.
+    const claimed = db
+      .prepare("UPDATE scheduled_jobs SET executed_at = ? WHERE id = ? AND status = 'pending' AND executed_at IS NULL")
+      .run(at, job.id);
+    if (claimed.changes === 0) continue;
+
+    const lateBy = at - job.fire_at;
+    if (isTooLate(job.fire_at, at)) {
+      const mins = Math.round(lateBy / 60_000);
+      db.prepare("UPDATE scheduled_jobs SET status = 'error', result = ? WHERE id = ?").run(
+        `missed — was due ${mins} min ago, past the ${Math.round(GRACE_MS / 60_000)} min grace window`,
+        job.id
+      );
+      console.warn(`[moonpool] skipped stale scheduled job ${job.id} (${mins} min late): ${job.label}`);
+      void sendAlert(
+        "scheduleMissed",
+        "Scheduled action missed",
+        `“${job.label || "one-shot job"}” was due ${mins} minutes ago and was skipped — Moonpool was not running at the time.`
+      ).catch(() => undefined);
+      continue;
+    }
+
     try {
       const actions = JSON.parse(job.actions) as PoolAction[];
       const results = await executeActions(actions, {
@@ -212,10 +269,18 @@ async function pollScheduledJobs(): Promise<void> {
         results.map((r) => (r.ok ? r.summary : `FAILED: ${r.error}`)).join("; ").slice(0, 500),
         job.id
       );
+      if (failed.length > 0) {
+        void sendAlert(
+          "scheduleMissed",
+          "Scheduled action failed",
+          `“${job.label || "one-shot job"}”: ${failed.map((f) => f.error).join("; ")}`
+        ).catch(() => undefined);
+      }
     } catch (err) {
-      db.prepare("UPDATE scheduled_jobs SET status = 'error', result = ? WHERE id = ?").run(
-        err instanceof Error ? err.message : "unknown error",
-        job.id
+      const message = err instanceof Error ? err.message : "unknown error";
+      db.prepare("UPDATE scheduled_jobs SET status = 'error', result = ? WHERE id = ?").run(message, job.id);
+      void sendAlert("scheduleMissed", "Scheduled action failed", `“${job.label || "one-shot job"}”: ${message}`).catch(
+        () => undefined
       );
     }
   }
@@ -234,6 +299,7 @@ export function startAutomationWorker(runtime: Runtime): void {
   };
   globalForWorker.__moonpoolWorker = state;
 
+  sweepInterruptedJobs();
   reloadAutomations();
   runtime.onSnapshot((snap) => {
     try {
