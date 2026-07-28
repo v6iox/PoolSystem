@@ -11,7 +11,7 @@ import type {
   ScheduleInput,
   ScheduleState,
 } from "@/types/pool";
-import { AdapterError, type PoolAdapter } from "./types";
+import { AdapterError, type PoolAdapter, type TempCalibration, type TempCalibrationInput } from "./types";
 
 /**
  * Full pool simulator for MOCK_MODE. Models a realistic EasyTouch system:
@@ -130,6 +130,8 @@ export class MockAdapter implements PoolAdapter {
   private airTemp = 74;
   private solarTemp = 88;
   private freezeProtect = false;
+  /** Sensor calibration offsets, applied to every reported reading. */
+  private calib = { water1: 0, air: 0, solar1: 0 };
 
   async start(): Promise<void> {
     if (this.timer) return;
@@ -158,7 +160,7 @@ export class MockAdapter implements PoolAdapter {
       name: b.name,
       kind: b.kind,
       isOn: this.circuitById(b.circuitId)?.isOn ?? false,
-      temp: Math.round(b.temp * 10) / 10,
+      temp: Math.round((b.temp + this.calib.water1) * 10) / 10,
       setPoint: b.setPoint,
       minSetPoint: 60,
       maxSetPoint: b.kind === "spa" ? 104 : 95,
@@ -238,7 +240,7 @@ export class MockAdapter implements PoolAdapter {
       mock: true,
       lastUpdate: Date.now(),
       units: "F",
-      airTemp: Math.round(this.airTemp * 10) / 10,
+      airTemp: Math.round((this.airTemp + this.calib.air) * 10) / 10,
       solarTemp: Math.round(this.solarTemp * 10) / 10,
       freezeProtect: this.freezeProtect,
       delay: false,
@@ -359,6 +361,26 @@ export class MockAdapter implements PoolAdapter {
         disabled: false,
       });
     }
+    this.emit();
+  }
+
+  async getTempCalibration(): Promise<TempCalibration> {
+    return {
+      water1: this.calib.water1,
+      water2: null,
+      air: this.calib.air,
+      solar1: this.calib.solar1,
+      solar2: null,
+      min: -10,
+      max: 10,
+    };
+  }
+
+  async setTempCalibration(input: TempCalibrationInput): Promise<void> {
+    const clamp = (v: number): number => Math.max(-10, Math.min(10, Math.round(v)));
+    if (input.water1 !== undefined) this.calib.water1 = clamp(input.water1);
+    if (input.air !== undefined) this.calib.air = clamp(input.air);
+    if (input.solar1 !== undefined) this.calib.solar1 = clamp(input.solar1);
     this.emit();
   }
 

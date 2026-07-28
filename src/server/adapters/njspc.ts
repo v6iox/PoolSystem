@@ -13,7 +13,7 @@ import type {
   ScheduleInput,
   ScheduleState,
 } from "@/types/pool";
-import { AdapterError, type PoolAdapter } from "./types";
+import { AdapterError, type PoolAdapter, type TempCalibration, type TempCalibrationInput } from "./types";
 
 /**
  * Adapter for nodejs-poolController (njsPC). REST for reads/writes, Socket.IO
@@ -205,12 +205,37 @@ export class NjspcAdapter implements PoolAdapter {
     });
   }
 
+  /**
+   * Apply a theme val to a circuit/group id. njsPC routes vary by version:
+   * newer builds accept the numeric val on /state/circuit/setTheme, some want
+   * the theme NAME, and light-specific builds use /state/light/setTheme.
+   * Try in order; first success wins.
+   */
+  private async putTheme(id: number, theme: number): Promise<void> {
+    const name = this.lightThemes.find((t) => t.val === theme)?.name.toLowerCase();
+    const attempts: Array<[string, Json]> = [
+      ["/state/circuit/setTheme", { id, theme }],
+      ...(name ? ([["/state/circuit/setTheme", { id, theme: name }]] as Array<[string, Json]>) : []),
+      ["/state/light/setTheme", { id, theme }],
+    ];
+    let lastErr: unknown = null;
+    for (const [path, payload] of attempts) {
+      try {
+        await this.put(path, payload);
+        return;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new AdapterError("Light theme change failed", 502);
+  }
+
   async setLightTheme(circuitId: number, theme: number): Promise<void> {
-    await this.put("/state/circuit/setTheme", { id: circuitId, theme });
+    await this.putTheme(circuitId, theme);
   }
 
   async setLightGroupTheme(groupId: number, theme: number): Promise<void> {
-    await this.put("/state/circuit/setTheme", { id: groupId, theme });
+    await this.putTheme(groupId, theme);
   }
 
   async upsertSchedule(input: ScheduleInput): Promise<void> {
@@ -234,6 +259,47 @@ export class NjspcAdapter implements PoolAdapter {
     await this.request("DELETE", "/config/schedule", { id: scheduleId });
   }
 
+  async getTempCalibration(): Promise<TempCalibration> {
+    // dashPanel reads these from /config/options/general; older builds keep
+    // them under equipment.tempSensors in /config/all. Try both.
+    let temps: Record<string, unknown> = {};
+    try {
+      const opts = asObj(await this.get("/config/options/general"));
+      temps = asObj(opts.temps);
+    } catch {
+      // fall through to /config/all
+    }
+    if (Object.keys(temps).length === 0) {
+      const config = asObj(await this.get("/config/all"));
+      temps = asObj(asObj(config.equipment).tempSensors);
+    }
+    const val = (key: string): number | null => {
+      const v = temps[key];
+      return typeof v === "number" && Number.isFinite(v) ? v : null;
+    };
+    return {
+      water1: val("waterTempAdj1") ?? 0,
+      water2: val("waterTempAdj2"),
+      air: val("airTempAdj"),
+      solar1: val("solarTempAdj1"),
+      solar2: val("solarTempAdj2"),
+      min: -10,
+      max: 10,
+    };
+  }
+
+  async setTempCalibration(input: TempCalibrationInput): Promise<void> {
+    const payload: Json = {};
+    if (input.water1 !== undefined) payload.waterTempAdj1 = input.water1;
+    if (input.water2 !== undefined) payload.waterTempAdj2 = input.water2;
+    if (input.air !== undefined) payload.airTempAdj = input.air;
+    if (input.solar1 !== undefined) payload.solarTempAdj1 = input.solar1;
+    if (input.solar2 !== undefined) payload.solarTempAdj2 = input.solar2;
+    if (Object.keys(payload).length === 0) return;
+    await this.put("/config/tempSensors", payload);
+    this.scheduleRefresh();
+  }
+
   // ── fetch/normalize ──────────────────────────────────────────────
 
   /** heat mode value lookup discovered from config: "bodyId:mode" → panel val */
@@ -250,7 +316,7 @@ export class NjspcAdapter implements PoolAdapter {
   private async refreshNow(): Promise<void> {
     try {
       const state = asObj(await this.get("/state/all"));
-      if (this.lightThemes.length === 0) await this.loadThemes();
+      if (this.lightThemes.length === 0) await this.loadThemes(state);
       await this.loadHeatModes();
       this.connected = true;
       this.pushSnapshot(this.normalize(state));
@@ -260,22 +326,57 @@ export class NjspcAdapter implements PoolAdapter {
     }
   }
 
-  private async loadThemes(): Promise<void> {
-    // Prefer per-installation themes; fall back to a broad IntelliBrite set.
-    try {
-      const raw = await this.get("/config/lightThemes");
-      const arr = asArr(raw);
-      if (arr.length > 0) {
-        this.lightThemes = arr.map((t) => {
-          const name = str(t.name, str(t.desc, `Theme ${num(t.val)}`));
-          const keyName = name.toLowerCase().replace(/[^a-z]/g, "");
-          const type: LightThemeDef["type"] = keyName.startsWith("color") ? "command" : THEME_SWATCHES[keyName]?.startsWith("linear") ? "show" : "color";
-          return { val: num(t.val), name, type, swatch: THEME_SWATCHES[keyName] ?? "#64748b" };
-        });
+  private themeFromJson(t: Json): LightThemeDef {
+    const name = str(t.name, str(t.desc, `Theme ${num(t.val)}`));
+    const keyName = name.toLowerCase().replace(/[^a-z]/g, "");
+    const type: LightThemeDef["type"] = keyName.startsWith("color")
+      ? "command"
+      : THEME_SWATCHES[keyName]?.startsWith("linear")
+        ? "show"
+        : "color";
+    return { val: num(t.val), name: str(t.desc, name), type, swatch: THEME_SWATCHES[keyName] ?? "#64748b" };
+  }
+
+  /**
+   * njsPC has no global theme list — themes are per circuit type. Union the
+   * themes of every light circuit via /config/circuit/:id/lightThemes, then
+   * fall back to /config/intellibrite/themes for older builds.
+   */
+  private async loadThemes(state: Json): Promise<void> {
+    const lightIds = [...asArr(state.circuits), ...asArr(state.features)]
+      .filter((c) => {
+        const typeName = str(c.type).toLowerCase().replace(/[^a-z]/g, "");
+        return LIGHT_TYPES.has(typeName) || "lightingTheme" in c;
+      })
+      .map((c) => num(c.id));
+
+    const byVal = new Map<number, LightThemeDef>();
+    for (const id of lightIds) {
+      try {
+        for (const t of asArr(await this.get(`/config/circuit/${id}/lightThemes`))) {
+          const def = this.themeFromJson(t);
+          if (!byVal.has(def.val)) byVal.set(def.val, def);
+        }
+      } catch {
+        // circuit has no theme list — not a light with themes
       }
-    } catch {
-      // endpoint not present on this njsPC version — leave empty, UI falls back
     }
+    if (byVal.size === 0) {
+      try {
+        for (const t of asArr(await this.get("/config/intellibrite/themes"))) {
+          const def = this.themeFromJson(t);
+          if (!byVal.has(def.val)) byVal.set(def.val, def);
+        }
+      } catch {
+        // endpoint not present either — leave empty and retry next refresh
+      }
+    }
+    // Drop non-themes njsPC mixes into the list (off/on aren't colors).
+    for (const [val, def] of byVal) {
+      const key = def.name.toLowerCase().replace(/[^a-z]/g, "");
+      if (key === "off" || key === "on" || key === "unknown") byVal.delete(val);
+    }
+    if (byVal.size > 0) this.lightThemes = [...byVal.values()];
   }
 
   private async loadHeatModes(): Promise<void> {

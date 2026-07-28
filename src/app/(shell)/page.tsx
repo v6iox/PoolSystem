@@ -9,7 +9,7 @@ import { AskBar } from "@/components/ask/ask-bar";
 import { WidgetGrid } from "@/components/widgets/widget-grid";
 import { Panel, Skeleton } from "@/components/ui/panel";
 import { roleAtLeast } from "@/types/auth";
-import { cn } from "@/lib/utils";
+import { cn, formatRelative } from "@/lib/utils";
 
 function Hero(): React.JSX.Element {
   const { snapshot, hasLoaded, backendConnected, user, sendAction } = usePool();
@@ -129,6 +129,11 @@ function Hero(): React.JSX.Element {
                 <p className="mt-2 text-xs capitalize text-ink-faint">
                   heat: {body.heatMode === "solarpref" ? "solar preferred" : body.heatMode}
                 </p>
+                {body.temp !== null && typeof body.tempChangedAt === "number" && (
+                  <p className="mt-0.5 text-[11px] text-ink-faint/70">
+                    reading updated {formatRelative(body.tempChangedAt)}
+                  </p>
+                )}
               </Panel>
             </motion.div>
           );

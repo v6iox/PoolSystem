@@ -32,6 +32,8 @@ export interface BodyState {
   heatStatus: HeatStatus;
   /** Circuit that turns this body on (e.g. Pool = 6, Spa = 1 on EasyTouch). */
   circuitId: number;
+  /** When the temp READING last changed (runtime-stamped) — staleness signal. */
+  tempChangedAt?: number | null;
 }
 
 export interface CircuitState {
@@ -156,6 +158,8 @@ export interface PoolStateSnapshot {
   lastUpdate: number;
   units: TempUnits;
   airTemp: number | null;
+  /** When the air reading last changed (runtime-stamped). */
+  airTempChangedAt?: number | null;
   solarTemp: number | null;
   freezeProtect: boolean;
   /** Heater/valve delay currently active. */
