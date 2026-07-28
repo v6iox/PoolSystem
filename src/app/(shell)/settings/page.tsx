@@ -113,7 +113,7 @@ export default function SettingsPage(): React.JSX.Element {
               Sign out
             </Button>
           </Panel>
-          <p className="mt-3 text-center text-[11px] text-ink-faint">Moonpool 1.0.0</p>
+          <p className="mt-3 text-center text-[11px] text-ink-faint">Moonpool {process.env.NEXT_PUBLIC_APP_VERSION ?? "dev"}</p>
         </motion.div>
       </div>
     </div>
