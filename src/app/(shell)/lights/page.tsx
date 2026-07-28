@@ -15,6 +15,7 @@ import { auroraBackground } from "@/components/lights/glow";
 import type { LightThemeDef } from "@/types/pool";
 import type { PoolAction } from "@/types/actions";
 import { LightsAdvanced } from "@/components/advanced/panels";
+import { LightCommands } from "@/components/lights/light-commands";
 
 const SECTION_SPRING = { type: "spring", stiffness: 300, damping: 30 } as const;
 
@@ -241,6 +242,8 @@ export default function LightsPage(): React.JSX.Element {
           </motion.section>
         )}
       </div>
+
+      <LightCommands />
 
       <LightsAdvanced />
     </div>

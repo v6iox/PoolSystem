@@ -152,9 +152,11 @@ export function expectationsFor(action: PoolAction): Expectation[] {
         },
       ];
     // Scenes verify through the individual actions they expand into; pump speed
-    // is intentionally unverified (see the note above).
+    // is intentionally unverified (see the note above). Light commands
+    // (sync/swim/hold…) have no observable state to check.
     case "runScene":
     case "setPumpSpeed":
+    case "lightCommand":
       return [];
   }
 }

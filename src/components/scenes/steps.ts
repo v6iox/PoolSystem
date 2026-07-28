@@ -1,4 +1,5 @@
 import type { HeatModeInput, PoolAction, SceneDef } from "@/types/actions";
+import { LIGHT_COMMAND_LABELS } from "@/types/actions";
 import type { CircuitState, PoolStateSnapshot } from "@/types/pool";
 
 /**
@@ -202,7 +203,8 @@ export function stepFromAction(action: PoolAction): StepDraft {
     }
     case "allOff":
       return blankStep("allOff");
-    case "superChlorinate": {
+    case "superChlorinate":
+    case "lightCommand": {
       const s = blankStep("raw");
       s.raw = action;
       return s;
@@ -341,6 +343,12 @@ export function describeAction(action: PoolAction, snapshot: PoolStateSnapshot, 
     case "runScene": {
       const scene = scenes.find((s) => s.id === action.sceneId);
       return `Run scene "${scene?.name ?? action.sceneId}"`;
+    }
+    case "lightCommand": {
+      const target = action.isGroup
+        ? snapshot.lightGroups.find((g) => g.id === action.targetId)?.name ?? `Group ${action.targetId}`
+        : circuitName(action.targetId);
+      return `${target} → ${LIGHT_COMMAND_LABELS[action.command] ?? action.command}`;
     }
     case "allOff":
       return "Everything off";

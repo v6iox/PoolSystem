@@ -98,6 +98,65 @@ export interface PanelClock {
   panelTime: string | null;
 }
 
+export interface BusPortHealth {
+  port: string;
+  status: string;
+  sent: number;
+  received: number;
+  collisions: number;
+  failed: number;
+}
+
+export interface NjspcBackupFile {
+  name: string;
+  at: number | null;
+  sizeKb: number | null;
+}
+
+export interface AdvancedChemController {
+  id: number;
+  name: string;
+  typeName: string;
+  bodyDesc: string;
+  phSetpoint: number | null;
+  orpSetpoint: number | null;
+  phTankLevel: number | null;
+  orpTankLevel: number | null;
+}
+
+export interface AdvancedChemDoser {
+  id: number;
+  name: string;
+  typeName: string;
+  bodyDesc: string;
+}
+
+export interface AdvancedCover {
+  id: number;
+  name: string;
+  bodyDesc: string;
+  normallyOn: boolean;
+}
+
+export interface AdvancedRemoteButton {
+  slot: number;
+  circuitId: number | null;
+  circuitName: string;
+}
+
+export interface AdvancedRemote {
+  id: number;
+  name: string;
+  typeName: string;
+  buttons: AdvancedRemoteButton[];
+}
+
+export interface VirtualEquipmentEntry {
+  kind: "pump" | "chlorinator" | "intellichem";
+  address: number;
+  name: string;
+}
+
 export interface AdvancedOptions {
   circuits: AdvancedCircuitConfig[];
   circuitFunctions: CircuitFunctionDef[];
@@ -107,6 +166,13 @@ export interface AdvancedOptions {
   heaters: AdvancedHeater[];
   valves: AdvancedValve[];
   clock: PanelClock;
+  rs485: BusPortHealth[];
+  backups: NjspcBackupFile[];
+  chemControllers: AdvancedChemController[];
+  chemDosers: AdvancedChemDoser[];
+  covers: AdvancedCover[];
+  remotes: AdvancedRemote[];
+  virtualEquipment: VirtualEquipmentEntry[];
 }
 
 export interface CircuitConfigInput {
@@ -145,6 +211,19 @@ export interface PoolAdapter {
   setValveName(id: number, name: string): Promise<void>;
   syncPanelClock(): Promise<void>;
   cancelDelay(): Promise<void>;
+  /** IntelliBrite bus commands (sync/swim/set/hold/recall) for a light or group. */
+  runLightCommand(targetId: number, command: string, isGroup: boolean): Promise<void>;
+  /** Trigger njsPC's own config backup (file stays in the njsPC volume). */
+  createNjspcBackup(): Promise<void>;
+  /** Remap a wall remote's buttons (slot → circuit). */
+  setRemoteButtons(id: number, buttons: Array<{ slot: number; circuitId: number }>): Promise<void>;
+  /** Manual chem feed (IntelliChem/doser), seconds of dosing. */
+  chemFeed(controllerId: number, kind: "ph" | "orp", seconds: number): Promise<void>;
+  startPacketCapture(): Promise<void>;
+  /** Stop capture and return the capture file for download. */
+  stopPacketCapture(): Promise<{ filename: string; content: string }>;
+  /** Full njsPC diagnostics snapshot (config + state + valuemaps). */
+  getDiagnostics(): Promise<unknown>;
 }
 
 export class AdapterError extends Error {

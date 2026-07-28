@@ -96,6 +96,42 @@ export async function PUT(request: NextRequest, { params }: Params): Promise<Nex
         log("cancelDelay", "panel delay");
         break;
       }
+      case "backup-create": {
+        await adapter.createNjspcBackup();
+        log("njspcBackup", "panel configuration");
+        break;
+      }
+      case "remote": {
+        const id = numField(body.id);
+        if (id === undefined || !Array.isArray(body.buttons)) return bad("id and buttons required");
+        const buttons = body.buttons
+          .map((b) => {
+            const rec = b as Record<string, unknown>;
+            const slot = numField(rec.slot);
+            const circuitId = numField(rec.circuitId);
+            return slot !== undefined && circuitId !== undefined ? { slot, circuitId } : null;
+          })
+          .filter((b): b is { slot: number; circuitId: number } => b !== null);
+        if (buttons.length === 0) return bad("No valid button mappings");
+        await adapter.setRemoteButtons(id, buttons);
+        log("panelRemoteButtons", `remote ${id}`, JSON.stringify(buttons));
+        break;
+      }
+      case "chem-feed": {
+        const id = numField(body.id);
+        const seconds = numField(body.seconds);
+        const kind = body.kind === "ph" || body.kind === "orp" ? body.kind : undefined;
+        if (id === undefined || kind === undefined || seconds === undefined) return bad("id, kind and seconds required");
+        if (seconds < 1 || seconds > 300) return bad("Manual dose must be 1–300 seconds");
+        await adapter.chemFeed(id, kind, Math.round(seconds));
+        log("chemManualFeed", `chem controller ${id}`, `${kind} for ${Math.round(seconds)}s`);
+        break;
+      }
+      case "capture-start": {
+        await adapter.startPacketCapture();
+        log("packetCaptureStart", "RS-485 bus");
+        break;
+      }
       default:
         return NextResponse.json({ error: `Unknown action "${action}"` }, { status: 404 });
     }
@@ -103,6 +139,42 @@ export async function PUT(request: NextRequest, { params }: Params): Promise<Nex
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "The controller rejected that change" },
+      { status: 502 }
+    );
+  }
+}
+
+/** File downloads: diagnostics snapshot and the stopped packet capture. */
+export async function GET(_request: NextRequest, { params }: Params): Promise<NextResponse> {
+  const { action } = await params;
+  const auth = await requireUser("owner");
+  if (!auth.ok) return auth.response;
+  const adapter = getRuntime().adapter;
+  try {
+    if (action === "diagnostics") {
+      const snapshot = await adapter.getDiagnostics();
+      audit({ userId: auth.user.id, userName: auth.user.name, source: "ui", action: "downloadDiagnostics", target: "njsPC" });
+      return new NextResponse(JSON.stringify(snapshot, null, 2), {
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Disposition": `attachment; filename="moonpool-diagnostics-${new Date().toISOString().slice(0, 10)}.json"`,
+        },
+      });
+    }
+    if (action === "capture-stop") {
+      const file = await adapter.stopPacketCapture();
+      audit({ userId: auth.user.id, userName: auth.user.name, source: "ui", action: "packetCaptureStop", target: "RS-485 bus" });
+      return new NextResponse(file.content, {
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Disposition": `attachment; filename="${file.filename}"`,
+        },
+      });
+    }
+    return NextResponse.json({ error: `Unknown action "${action}"` }, { status: 404 });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "The controller rejected that request" },
       { status: 502 }
     );
   }

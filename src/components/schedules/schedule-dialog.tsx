@@ -87,6 +87,9 @@ function ScheduleForm({
   );
   const [start, setStart] = useState(schedule ? minutesToTimeValue(schedule.startTime) : "09:00");
   const [end, setEnd] = useState(schedule ? minutesToTimeValue(schedule.endTime) : "17:00");
+  // Panel-native sun anchoring: the panel recomputes the time daily itself.
+  const [startAnchor, setStartAnchor] = useState<"manual" | "sunrise" | "sunset">(schedule?.startTimeType ?? "manual");
+  const [endAnchor, setEndAnchor] = useState<"manual" | "sunrise" | "sunset">(schedule?.endTimeType ?? "manual");
   const [days, setDays] = useState<number[]>(schedule?.days ?? [0, 1, 2, 3, 4, 5, 6]);
   const [type, setType] = useState<"repeat" | "runonce">(schedule?.scheduleType ?? "repeat");
   const [heatSetpoint, setHeatSetpoint] = useState(
@@ -137,6 +140,8 @@ function ScheduleForm({
       endTime: endMin,
       days: [...days].sort((a, b) => a - b),
       scheduleType: type,
+      startTimeType: startAnchor,
+      endTimeType: endAnchor,
       heatSetpoint: body && setpointNum !== null && !setpointInvalid ? Math.round(setpointNum) : null,
       heatSource: body && heatSource !== "none" ? heatSource : null,
     };
@@ -184,14 +189,48 @@ function ScheduleForm({
       </Field>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Starts">
-          <Input type="time" value={start} onChange={(e) => setStart(e.target.value)} aria-label="Start time" />
+        <Field label="Starts" hint={startAnchor !== "manual" ? `The panel starts this at ${startAnchor} each day` : undefined}>
+          <Select
+            value={startAnchor}
+            onValueChange={(v) => setStartAnchor(v as "manual" | "sunrise" | "sunset")}
+            aria-label="Start anchor"
+            className="mb-1.5 h-9"
+            options={[
+              { value: "manual", label: "At a time" },
+              { value: "sunrise", label: "At sunrise" },
+              { value: "sunset", label: "At sunset" },
+            ]}
+          />
+          {startAnchor === "manual" && (
+            <Input type="time" value={start} onChange={(e) => setStart(e.target.value)} aria-label="Start time" />
+          )}
         </Field>
         <Field
           label="Ends"
-          hint={zeroLength ? "End must differ from start" : overnight ? "Ends next day (overnight run)" : undefined}
+          hint={
+            endAnchor !== "manual"
+              ? `The panel ends this at ${endAnchor} each day`
+              : zeroLength
+                ? "End must differ from start"
+                : overnight
+                  ? "Ends next day (overnight run)"
+                  : undefined
+          }
         >
-          <Input type="time" value={end} onChange={(e) => setEnd(e.target.value)} aria-label="End time" />
+          <Select
+            value={endAnchor}
+            onValueChange={(v) => setEndAnchor(v as "manual" | "sunrise" | "sunset")}
+            aria-label="End anchor"
+            className="mb-1.5 h-9"
+            options={[
+              { value: "manual", label: "At a time" },
+              { value: "sunrise", label: "At sunrise" },
+              { value: "sunset", label: "At sunset" },
+            ]}
+          />
+          {endAnchor === "manual" && (
+            <Input type="time" value={end} onChange={(e) => setEnd(e.target.value)} aria-label="End time" />
+          )}
         </Field>
       </div>
 

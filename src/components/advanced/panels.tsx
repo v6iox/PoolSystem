@@ -258,11 +258,14 @@ export function DelayBanner(): React.JSX.Element | null {
   const { send } = useAdvanced();
   const [busy, setBusy] = useState(false);
   if (!snapshot.delay || user.role === "guest") return null;
+  const detail = (snapshot.delays ?? []).filter(Boolean).join(", ");
   return (
     <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-warn/25 bg-warn/10 px-3 py-2 text-sm text-warn">
       <span className="flex items-center gap-2">
         <Clock3 size={15} className="shrink-0" />
-        The panel is in a delay (heater cool-down or valve turn) — some circuits are briefly locked.
+        {detail
+          ? `Panel delay active: ${detail} — some circuits are briefly locked.`
+          : "The panel is in a delay (heater cool-down or valve turn) — some circuits are briefly locked."}
       </span>
       <Button
         variant="ghost"

@@ -21,6 +21,8 @@ function validateInput(body: unknown): ScheduleInput | string {
       return "heatSetpoint must be 60–104";
     }
   }
+  const anchor = (v: unknown): "manual" | "sunrise" | "sunset" =>
+    v === "sunrise" || v === "sunset" ? v : "manual";
   return {
     id: typeof b.id === "number" ? b.id : undefined,
     circuitId: b.circuitId,
@@ -28,6 +30,8 @@ function validateInput(body: unknown): ScheduleInput | string {
     endTime: b.endTime,
     days: b.days,
     scheduleType,
+    startTimeType: anchor(b.startTimeType),
+    endTimeType: anchor(b.endTimeType),
     heatSetpoint: b.heatSetpoint ?? null,
     heatSource: typeof b.heatSource === "string" ? b.heatSource : null,
   };

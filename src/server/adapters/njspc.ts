@@ -261,8 +261,10 @@ export class NjspcAdapter implements PoolAdapter {
       scheduleType: input.scheduleType === "runonce" ? 26 : 0,
       heatSetpoint: input.heatSetpoint ?? undefined,
       heatSource: input.heatSource ?? undefined,
-      startTimeType: 0,
-      endTimeType: 0,
+      // Panel-native sun anchoring: 0 = manual, 1 = sunrise, 2 = sunset —
+      // the panel recomputes the actual time daily, no server involved.
+      startTimeType: input.startTimeType === "sunrise" ? 1 : input.startTimeType === "sunset" ? 2 : 0,
+      endTimeType: input.endTimeType === "sunrise" ? 1 : input.endTimeType === "sunset" ? 2 : 0,
     };
     if (input.id !== undefined) payload.id = input.id;
     await this.put("/config/schedule", payload);
@@ -319,15 +321,22 @@ export class NjspcAdapter implements PoolAdapter {
     // Each area comes from its own njsPC options endpoint; any one failing
     // (older builds, odd equipment) just leaves that area empty.
     const opt = async (path: string): Promise<Json> => asObj(await this.get(path).catch(() => ({})));
-    const [circuitsOpt, pumpsOpt, lightsOpt, heatersOpt, valvesOpt, generalOpt, stateAll] = await Promise.all([
-      opt("/config/options/circuits"),
-      opt("/config/options/pumps"),
-      opt("/config/options/lightGroups"),
-      opt("/config/options/heaters"),
-      opt("/config/options/valves"),
-      opt("/config/options/general"),
-      opt("/state/all"),
-    ]);
+    const [circuitsOpt, pumpsOpt, lightsOpt, heatersOpt, valvesOpt, generalOpt, stateAll, rs485Opt, restoreOpt, chemOpt, doserOpt, coversOpt, remotesOpt] =
+      await Promise.all([
+        opt("/config/options/circuits"),
+        opt("/config/options/pumps"),
+        opt("/config/options/lightGroups"),
+        opt("/config/options/heaters"),
+        opt("/config/options/valves"),
+        opt("/config/options/general"),
+        opt("/state/all"),
+        opt("/config/options/rs485"),
+        opt("/app/config/options/restore"),
+        opt("/config/options/chemControllers"),
+        opt("/config/options/chemDosers"),
+        opt("/config/options/covers"),
+        opt("/config/options/remotes"),
+      ]);
 
     const circuitName = (id: number): string =>
       [...this.snapshot.circuits, ...this.snapshot.features].find((c) => c.id === id)?.name ?? `Circuit ${id}`;
@@ -409,6 +418,76 @@ export class NjspcAdapter implements PoolAdapter {
         : typeof asObj(rawPanelTime).ISO === "string"
           ? String(asObj(rawPanelTime).ISO)
           : null;
+    // RS-485 bus health: njsPC nests counters differently across versions.
+    const rs485 = asArr(rs485Opt.ports ?? rs485Opt.comms ?? rs485Opt.commPorts).map((p) => {
+      const stats = asObj(p.stats ?? p.counter ?? p);
+      return {
+        port: str(p.rs485Port ?? p.port ?? p.name, "RS-485"),
+        status: str(p.status, bool(p.isOpen ?? p.enabled) ? "open" : "unknown"),
+        sent: num(stats.msgSent ?? stats.bytesSent ?? stats.sent),
+        received: num(stats.msgReceived ?? stats.bytesReceived ?? stats.received),
+        collisions: num(stats.collisions),
+        failed: num(stats.msgFailed ?? stats.failed ?? stats.writeFailures),
+      };
+    });
+
+    const backups = asArr(restoreOpt.backupFiles ?? restoreOpt.files).map((f) => {
+      const name = str(f.name ?? f.filePath ?? f, typeof f === "string" ? f : "backup");
+      const parsedTime = Date.parse(str(f.timestamp ?? f.date, ""));
+      return {
+        name,
+        at: Number.isFinite(parsedTime) ? parsedTime : null,
+        sizeKb: numOrNull(f.size) !== null ? Math.round((numOrNull(f.size) as number) / 1024) : null,
+      };
+    });
+
+    const chemControllers = asArr(chemOpt.controllers ?? chemOpt.chemControllers).map((c) => ({
+      id: num(c.id),
+      name: str(c.name, `Chem controller ${num(c.id)}`),
+      typeName: str(c.type, "intellichem"),
+      bodyDesc: str(asObj(c.body).desc ?? c.body, ""),
+      phSetpoint: numOrNull(asObj(c.ph).setpoint ?? c.phSetpoint),
+      orpSetpoint: numOrNull(asObj(c.orp).setpoint ?? c.orpSetpoint),
+      phTankLevel: numOrNull(asObj(asObj(c.ph).tank).level ?? c.phTankLevel),
+      orpTankLevel: numOrNull(asObj(asObj(c.orp).tank).level ?? c.orpTankLevel),
+    }));
+
+    const chemDosers = asArr(doserOpt.dosers ?? doserOpt.chemDosers).map((d) => ({
+      id: num(d.id),
+      name: str(d.name, `Doser ${num(d.id)}`),
+      typeName: str(d.type, "doser"),
+      bodyDesc: str(asObj(d.body).desc ?? d.body, ""),
+    }));
+
+    const covers = asArr(coversOpt.covers).map((c) => ({
+      id: num(c.id),
+      name: str(c.name, `Cover ${num(c.id)}`),
+      bodyDesc: str(asObj(c.body).desc ?? c.body, ""),
+      normallyOn: bool(c.normallyOn),
+    }));
+
+    const remotes = asArr(remotesOpt.remotes).map((r) => ({
+      id: num(r.id),
+      name: str(r.name, `Remote ${num(r.id)}`),
+      typeName: str(r.type, "remote"),
+      buttons: asArr(r.circuits ?? r.buttons).map((b, i) => {
+        const cid = numOrNull(asObj(b.circuit).id ?? b.circuit);
+        return { slot: num(b.id, i + 1), circuitId: cid, circuitName: cid !== null ? circuitName(cid) : "—" };
+      }),
+    }));
+
+    const virtualEquipment: AdvancedOptions["virtualEquipment"] = [];
+    for (const [kind, list] of [
+      ["pump", pumpsOpt.pumps],
+      ["chlorinator", asObj(await this.get("/config/options/chlorinators").catch(() => ({}))).chlorinators],
+    ] as const) {
+      for (const item of asArr(list)) {
+        if (str(asObj(item.master).name ?? item.master).toLowerCase().includes("njspc") || bool(item.isVirtual)) {
+          virtualEquipment.push({ kind, address: num(item.address, num(item.id)), name: str(item.name, `virtual ${kind}`) });
+        }
+      }
+    }
+
     return {
       circuits,
       circuitFunctions,
@@ -423,7 +502,66 @@ export class NjspcAdapter implements PoolAdapter {
         serverTime: new Date().toISOString(),
         panelTime,
       },
+      rs485,
+      backups,
+      chemControllers,
+      chemDosers,
+      covers,
+      remotes,
+      virtualEquipment,
     };
+  }
+
+  async runLightCommand(targetId: number, command: string, isGroup: boolean): Promise<void> {
+    // Dedicated per-command routes exist for some commands; runCommand covers
+    // all of them. Try the group route first for groups, then the light route.
+    const attempts = isGroup
+      ? [
+          ["/state/lightGroup/runCommand", { id: targetId, command }],
+          ["/state/light/runCommand", { id: targetId, command }],
+        ]
+      : [["/state/light/runCommand", { id: targetId, command }]];
+    let lastErr: unknown = null;
+    for (const [path, payload] of attempts as Array<[string, Json]>) {
+      try {
+        await this.put(path, payload);
+        this.scheduleRefresh();
+        return;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new AdapterError("Light command failed", 502);
+  }
+
+  async createNjspcBackup(): Promise<void> {
+    await this.put("/app/config/createBackup", { name: `moonpool-${new Date().toISOString().slice(0, 10)}` });
+  }
+
+  async setRemoteButtons(id: number, buttons: Array<{ slot: number; circuitId: number }>): Promise<void> {
+    await this.put("/config/remote", {
+      id,
+      circuits: buttons.map((b) => ({ id: b.slot, circuit: b.circuitId })),
+    });
+  }
+
+  async chemFeed(controllerId: number, kind: "ph" | "orp", seconds: number): Promise<void> {
+    await this.put("/config/chemController/feed", { id: controllerId, type: kind, time: seconds, quantity: seconds });
+  }
+
+  async startPacketCapture(): Promise<void> {
+    await this.get("/app/config/startPacketCapture");
+  }
+
+  async stopPacketCapture(): Promise<{ filename: string; content: string }> {
+    const res = await fetch(`${this.baseUrl}/app/config/stopPacketCapture`);
+    if (!res.ok) throw new AdapterError(`stopPacketCapture returned ${res.status}`, 502);
+    const content = await res.text();
+    return { filename: `njspc-capture-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, content };
+  }
+
+  async getDiagnostics(): Promise<unknown> {
+    return this.get("/app/diagnostics/snapshot");
   }
 
   async setCircuitConfig(input: CircuitConfigInput): Promise<void> {
@@ -698,6 +836,12 @@ export class NjspcAdapter implements PoolAdapter {
         days = DAY_BITS.flatMap((bit, i) => ((mask & bit) !== 0 ? [i] : []));
       }
       const typeName = str(s.scheduleType).toLowerCase();
+      const anchor = (raw: unknown): "manual" | "sunrise" | "sunset" => {
+        const name = str(raw).toLowerCase();
+        if (name.includes("sunrise") || num(asObj(raw).val ?? raw, 0) === 1) return "sunrise";
+        if (name.includes("sunset") || num(asObj(raw).val ?? raw, 0) === 2) return "sunset";
+        return "manual";
+      };
       return {
         id: num(s.id),
         circuitId: num(asObj(s.circuit).id ?? s.circuit),
@@ -707,6 +851,8 @@ export class NjspcAdapter implements PoolAdapter {
         days,
         scheduleType: typeName.includes("once") ? "runonce" : "repeat",
         isEggTimer: typeName.includes("egg"),
+        startTimeType: anchor(s.startTimeType),
+        endTimeType: anchor(s.endTimeType),
         heatSetpoint: numOrNull(s.heatSetpoint),
         heatSource: s.heatSource === undefined ? null : str(s.heatSource) || null,
         disabled: bool(s.disabled),
@@ -752,6 +898,17 @@ export class NjspcAdapter implements PoolAdapter {
       solarTemp: numOrNull(temps.solar),
       freezeProtect: bool(state.freeze),
       delay: bool(state.delay) || num(asObj(state.delay).val) > 0,
+      // Which delays, not just "a delay": panel-level desc + per-circuit flags.
+      delays: (() => {
+        const out: string[] = [];
+        const panelDelay = str(state.delay).toLowerCase();
+        if (panelDelay && panelDelay !== "nodelay" && panelDelay !== "no delay") out.push(str(state.delay));
+        for (const c of [...asArr(state.circuits), ...asArr(state.features)]) {
+          if (bool(c.startDelay)) out.push(`${str(c.name, `circuit ${num(c.id)}`)} start delay`);
+          if (bool(c.stopDelay)) out.push(`${str(c.name, `circuit ${num(c.id)}`)} stop delay`);
+        }
+        return out;
+      })(),
       panelMode,
       bodies,
       circuits,

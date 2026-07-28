@@ -423,6 +423,18 @@ cd ~/moonpool && git pull && docker compose up -d --build
 The database schema migrates itself on boot. History samples are pruned at 90
 days; daily rollups are kept forever and stay tiny.
 
+### Equipment-aware extras
+
+Everything njsPC can talk to has a home in Moonpool, and every section is
+capability-gated — it appears only when your panel actually reports the
+hardware: RS-485 bus health and panel-config backups (Settings → System),
+raw packet capture + diagnostics snapshot downloads for support, IntelliBrite
+color commands (sync/swim/set/hold/recall on the Lights page), panel-native
+sunrise/sunset schedule anchors, wall-remote (iS4/QuickTouch) button
+remapping, IntelliChem setpoints/tank levels with audited manual dosing,
+chem dosers, and pool covers. A system without the hardware simply never
+shows the section.
+
 **Don't hand-edit files in the install directory.** Updates check out the
 release tag over the working tree — if the updater finds local edits it
 refuses and lists them in the UI, where you can either keep them (and skip
