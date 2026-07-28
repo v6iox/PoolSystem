@@ -596,14 +596,17 @@ export class NjspcAdapter implements PoolAdapter {
 
   async syncPanelClock(): Promise<void> {
     // EasyTouch/IntelliTouch dateTime payload; dow is the panel's day bitmask
-    // (Sunday=1 … Saturday=64), year is normalized board-side.
+    // (Sunday=1 … Saturday=64). The year MUST be two-digit: the protocol field
+    // is one byte, and njsPC only normalizes the year when it defaults from
+    // panel state — a request-supplied 2026 goes onto the bus raw and the
+    // panel rejects the whole message ("Invalid payload detected").
     const d = new Date();
     await this.put("/config/dateTime", {
       hour: d.getHours(),
       min: d.getMinutes(),
       date: d.getDate(),
       month: d.getMonth() + 1,
-      year: d.getFullYear(),
+      year: d.getFullYear() % 100,
       dow: 1 << d.getDay(),
     });
   }
