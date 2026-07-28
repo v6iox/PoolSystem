@@ -2,6 +2,9 @@ import { getDb, now } from "@/server/db";
 import { audit } from "@/server/audit";
 import { getRuntime } from "@/server/runtime";
 import { AdapterError } from "@/server/adapters/types";
+import { sendAlert } from "@/server/push";
+import { verifyAction } from "@/server/verify";
+import type { PoolStateSnapshot } from "@/types/pool";
 import type { ActionResult, ActionSource, PoolAction } from "@/types/actions";
 import type { SceneDef } from "@/types/actions";
 import type { Role } from "@/types/auth";
@@ -199,6 +202,90 @@ function themeName(theme: number): string {
   return t ? t.name : `theme ${theme}`;
 }
 
+/* ── verification ───────────────────────────────────────────────────────── */
+
+/**
+ * Re-issue only the adapter calls for an action, with no auditing or summary.
+ * Used by the verifier when a command appears to have been dropped on the way
+ * to the panel. Mirrors the action types verify.ts knows how to check.
+ */
+async function resendAction(action: PoolAction): Promise<void> {
+  const adapter = getRuntime().adapter;
+  switch (action.type) {
+    case "setCircuit":
+      await adapter.setCircuit(action.circuitId, action.state);
+      return;
+    case "setHeat":
+      if (action.mode !== undefined) await adapter.setHeatMode(action.bodyId, action.mode);
+      if (action.setPoint !== undefined) await adapter.setSetPoint(action.bodyId, action.setPoint);
+      return;
+    case "setChlorinator":
+      await adapter.setChlorinator(action.chlorId, action.poolSetpoint, action.spaSetpoint);
+      return;
+    case "superChlorinate":
+      await adapter.setSuperChlor(action.chlorId, action.on, action.hours);
+      return;
+    case "setLightTheme":
+      await adapter.setLightTheme(action.circuitId, action.theme);
+      return;
+    case "setLightGroupTheme":
+      await adapter.setLightGroupTheme(action.groupId, action.theme);
+      return;
+    case "allOff": {
+      const snap = getRuntime().getSnapshot();
+      for (const c of [...snap.circuits, ...snap.features].filter((x) => x.isOn)) {
+        await adapter.setCircuit(c.id, false);
+      }
+      return;
+    }
+    case "runScene":
+    case "setPumpSpeed":
+      return;
+  }
+}
+
+/**
+ * Confirm in the background that a command actually landed on the panel, and
+ * say so plainly when it didn't. Deliberately fire-and-forget: verification
+ * must never delay or fail the user's request.
+ */
+function startVerification(action: PoolAction, before: PoolStateSnapshot, ctx: ActionContext): void {
+  const runtime = getRuntime();
+  if (!before.connected) return; // nothing to verify against
+  void verifyAction(action, before, {
+    snapshot: () => runtime.getSnapshot(),
+    resend: () => resendAction(action),
+    wait: (ms) => new Promise((r) => setTimeout(r, ms)),
+    onResult: (outcome) => {
+      const detail =
+        outcome.state === "overridden"
+          ? `${outcome.label} is ${outcome.got ?? "?"}, not the ${outcome.want} that was commanded — something else changed it`
+          : `${outcome.label} never reached ${outcome.want} (still ${outcome.got ?? "?"})${outcome.retried ? " after a retry" : ""}`;
+      console.warn(`[moonpool] unconfirmed command: ${detail}`);
+      audit({
+        userId: ctx.userId,
+        userName: ctx.userName,
+        source: ctx.source,
+        action: action.type,
+        target: describeTarget(action),
+        ok: false,
+        detail: `unconfirmed — ${detail}`,
+      });
+      // Only a dropped command means the panel ignored us; an override is a
+      // conflict, not a fault, so it's audited but not pushed.
+      if (outcome.state === "dropped") {
+        void sendAlert(
+          "commandUnconfirmed",
+          "Command didn't take effect",
+          `${describeTarget(action)}: ${detail}.`
+        ).catch(() => undefined);
+      }
+    },
+  }).catch((err: unknown) => {
+    console.error("[moonpool] verification failed to run", err);
+  });
+}
+
 /** Execute one action. Never throws — failures come back in the result. */
 export async function executeAction(action: PoolAction, ctx: ActionContext): Promise<ActionResult> {
   const runtime = getRuntime();
@@ -314,6 +401,9 @@ export async function executeAction(action: PoolAction, ctx: ActionContext): Pro
     }
 
     audit({ userId: ctx.userId, userName: ctx.userName, source: ctx.source, action: action.type, target, oldValue, newValue });
+    // The adapter resolving only means the request was accepted. Confirm out of
+    // band that the panel actually moved, and alert if it never does.
+    startVerification(action, snap, ctx);
     return { ok: true, action, summary };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

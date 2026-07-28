@@ -35,3 +35,7 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+# local dev server scratch (scripts/dev-mac.sh)
+.moonpool-dev.log
+.moonpool-dev.pid

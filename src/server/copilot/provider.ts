@@ -3,6 +3,7 @@ import { parseUtterance } from "./mock-parser";
 import { parseWithLlm, type LlmPlan } from "./llm";
 import { parseWithCodex } from "./codex";
 import { getOauthStatus } from "./openai-oauth";
+import { groundPlan } from "./grounding";
 import type { CopilotContext } from "./tools";
 
 /**
@@ -49,6 +50,26 @@ export interface ParsedUtterance {
   note?: string;
   /** Conversational reply for no-action turns (LLM providers only). */
   reply?: string;
+  /** Deterministic corrections applied on top of the model's output. */
+  corrections?: string[];
+}
+
+/**
+ * Every LLM answer passes through the same deterministic grounding pass, so
+ * the details a regex can settle from the user's own words — which body, which
+ * circuit, and when — don't depend on the model. See grounding.ts.
+ */
+function ground(text: string, plan: LlmPlan, ctx: CopilotContext): ParsedUtterance {
+  const { calls, corrections } = groundPlan(text, plan.tool_calls, ctx);
+  if (corrections.length > 0) {
+    console.log(`[moonpool] copilot grounding: ${corrections.map((c) => `${c.rule}: ${c.detail}`).join(" | ")}`);
+  }
+  return {
+    calls,
+    note: plan.needs_confirmation_note,
+    reply: plan.reply,
+    ...(corrections.length > 0 ? { corrections: corrections.map((c) => c.detail) } : {}),
+  };
 }
 
 /** Route an utterance to whichever brain is configured. */
@@ -63,12 +84,12 @@ export async function parseWithProvider(text: string, ctx: CopilotContext): Prom
       model,
       timeoutMs: 20_000,
     });
-    return { calls: plan.tool_calls, note: plan.needs_confirmation_note, reply: plan.reply };
+    return ground(text, plan, ctx);
   }
 
   if (config.provider === "chatgpt-oauth" && getOauthStatus().connected) {
     const plan = await parseWithCodex(text, ctx, model);
-    return { calls: plan.tool_calls, note: plan.needs_confirmation_note, reply: plan.reply };
+    return ground(text, plan, ctx);
   }
 
   // Default: env-configured backend; deterministic parser when simulating.
@@ -81,5 +102,5 @@ export async function parseWithProvider(text: string, ctx: CopilotContext): Prom
   }
   // The Settings model override applies to the local brain too.
   const plan = await parseWithLlm(text, ctx, config.model ? { model: config.model } : {});
-  return { calls: plan.tool_calls, note: plan.needs_confirmation_note, reply: plan.reply };
+  return ground(text, plan, ctx);
 }

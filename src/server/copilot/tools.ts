@@ -3,7 +3,8 @@ import type { BodyState, CircuitState, LightThemeDef, PoolStateSnapshot } from "
 import type { Role } from "@/types/auth";
 import { roleAtLeast } from "@/types/auth";
 import { validateTriggerShape } from "@/server/validate";
-import { formatClock, formatDays, formatMinutes } from "@/lib/utils";
+import { formatClock, formatDays, formatMinutes, formatWhen } from "@/lib/utils";
+import { parseTimeToken } from "./nlu";
 
 /**
  * The copilot tool vocabulary. The language model (or the deterministic mock
@@ -36,7 +37,9 @@ export type ToolCall =
   | { tool: "set_pump_speed"; args: { rpm: number } }
   | { tool: "super_chlorinate"; args: { on: boolean; hours: number } }
   | { tool: "all_off"; args: Record<string, never> }
-  | { tool: "schedule_once"; args: { actions: ToolCall[]; at?: string; inMinutes?: number } }
+  // fireAt is the absolute instant this resolves to, fixed when the plan is
+  // proposed. at/inMinutes are kept only to explain the plan back to the user.
+  | { tool: "schedule_once"; args: { actions: ToolCall[]; fireAt: number; at?: string; inMinutes?: number } }
   | { tool: "create_schedule"; args: { circuitId: number; start: string; end: string; days: number[] } }
   | { tool: "list_schedules"; args: Record<string, never> }
   | { tool: "delete_schedule"; args: { id: number } }
@@ -387,20 +390,58 @@ export function parseHHMM(value: unknown): number | null {
 }
 
 /** Resolve a schedule "at" ("HH:MM" tonight-semantics, or ISO) to epoch ms. */
+/**
+ * Turn a model-supplied time string into an absolute instant, always in the
+ * server's local zone. Accepts "HH:MM" / "HH:MM:SS" (next occurrence),
+ * "YYYY-MM-DD[THH:MM[:SS]]" and loose clock forms like "9pm" that the
+ * `at: string` contract invites a small model to emit.
+ */
 export function resolveAt(at: string, nowMs: number = Date.now()): number | null {
-  const hm = /^(\d{1,2}):(\d{2})$/.exec(at.trim());
+  const raw = at.trim();
+
+  const hm = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(raw);
   if (hm && hm[1] !== undefined && hm[2] !== undefined) {
     const hour = Number(hm[1]);
     const minute = Number(hm[2]);
     if (hour > 23 || minute > 59) return null;
     const d = new Date(nowMs);
     d.setHours(hour, minute, 0, 0);
-    if (d.getTime() <= nowMs + 30_000) d.setDate(d.getDate() + 1); // already passed today → tonight/tomorrow
+    // Roll to tomorrow only once the time has genuinely passed. The old
+    // 30-second cushion turned "at 9pm" said at 8:59:40 into a 24-hour wait.
+    if (d.getTime() <= nowMs) d.setDate(d.getDate() + 1);
     return d.getTime();
   }
-  const parsed = Date.parse(at);
+
+  // Date-only and offset-less date-times must be read as LOCAL. Date.parse
+  // treats the date-only form as UTC per spec, which lands a Denver "tomorrow"
+  // six hours early — on the previous evening.
+  const iso = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(raw);
+  if (iso) {
+    const [, y, mo, day, h, mi, s] = iso;
+    const d = new Date(
+      Number(y),
+      Number(mo) - 1,
+      Number(day),
+      h !== undefined ? Number(h) : 0,
+      mi !== undefined ? Number(mi) : 0,
+      s !== undefined ? Number(s) : 0,
+      0
+    );
+    return Number.isFinite(d.getTime()) ? d.getTime() : null;
+  }
+
+  // "9pm", "9:30 pm", "midnight" — same next-occurrence semantics as "HH:MM".
+  const loose = parseTimeToken(raw);
+  if (loose !== null && /^\d{1,2}(:\d{2})?\s*(a\.?\s?m\.?|p\.?\s?m\.?)$|^(midnight|noon)$/i.test(raw)) {
+    return resolveAt(loose, nowMs);
+  }
+
+  const parsed = Date.parse(raw);
   return Number.isFinite(parsed) ? parsed : null;
 }
+
+/** How far ahead a one-shot may be scheduled. */
+export const MAX_SCHEDULE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /* ── validation ─────────────────────────────────────────────────────────── */
 
@@ -461,7 +502,13 @@ export function validateToolCall(raw: unknown, ctx: CopilotContext): ValidationR
 
     case "set_heat": {
       const bodyRef = typeof args.body === "string" ? args.body : "";
-      const body = findBody(ctx, bodyRef || "spa");
+      // A missing body used to silently mean "spa", so a dropped arg could heat
+      // the wrong water. With one body there's nothing to guess; with two, ask.
+      if (!bodyRef) {
+        if (ctx.snapshot.bodies.length === 0) return fail("There's no body of water to heat.");
+        if (ctx.snapshot.bodies.length > 1) return fail("Which one — the pool or the spa?");
+      }
+      const body = bodyRef ? findBody(ctx, bodyRef) : ctx.snapshot.bodies[0];
       if (!body) return fail(bodyRef ? `There's no ${bodyRef} on this system.` : "There's no body of water to heat.");
       const mode = typeof args.mode === "string" ? (args.mode as HeatModeInput) : undefined;
       if (mode !== undefined) {
@@ -560,16 +607,38 @@ export function validateToolCall(raw: unknown, ctx: CopilotContext): ValidationR
         (typeof args.inMinutes === "string" && /^\d+(\.\d+)?$/.test(args.inMinutes.trim()) ? Number(args.inMinutes) : undefined);
       let at: string | undefined;
       let inMinutes: number | undefined;
+      // The instant is pinned the first time a plan is validated and then
+      // carried through storage and re-validation untouched. Re-deriving it
+      // when the user taps Confirm is what let a 9 PM plan confirmed at 9:01
+      // silently slide a full day, and made every "in 2 hours" ETA a lie.
+      let fireAt = num(args.fireAt);
+      const alreadyAnchored = fireAt !== undefined;
+
       if (inMinutesRaw !== undefined) {
         inMinutes = Math.round(inMinutesRaw);
         if (inMinutes < 1 || inMinutes > 7 * 24 * 60) return fail("I can schedule things between 1 minute and 7 days from now.");
-      } else {
-        if (typeof args.at !== "string") return fail("When should that happen? I couldn't work out the time.");
-        const fireAt = resolveAt(args.at);
-        if (fireAt === null) return fail(`I couldn't understand the time "${args.at}".`);
-        if (fireAt <= Date.now()) return fail("That time is already in the past.");
+        fireAt ??= Date.now() + inMinutes * 60_000;
+      } else if (typeof args.at === "string") {
+        const resolved = resolveAt(args.at);
+        if (resolved === null) return fail(`I couldn't understand the time "${args.at}".`);
         at = args.at;
+        fireAt ??= resolved;
+      } else if (fireAt === undefined) {
+        return fail("When should that happen? I couldn't work out the time.");
       }
+
+      if (fireAt === undefined || !Number.isFinite(fireAt)) return fail("When should that happen? I couldn't work out the time.");
+      if (fireAt <= Date.now()) {
+        return fail(
+          alreadyAnchored
+            ? `That was set for ${formatWhen(fireAt)}, which has already passed — ask me again if you still want it.`
+            : "That time is already in the past."
+        );
+      }
+      // `at` used to be unbounded while inMinutes was capped at 7 days, so a
+      // hallucinated ISO date could park a job months out.
+      if (fireAt > Date.now() + MAX_SCHEDULE_MS) return fail("I can schedule things between 1 minute and 7 days from now.");
+
       if (!Array.isArray(args.actions) || args.actions.length === 0) return fail("There was nothing to schedule.");
       if (args.actions.length > 10) return fail("That's too many steps for one schedule (max 10).");
       const inner: ToolCall[] = [];
@@ -583,7 +652,12 @@ export function validateToolCall(raw: unknown, ctx: CopilotContext): ValidationR
         ok: true,
         call: {
           tool,
-          args: { actions: inner, ...(at !== undefined ? { at } : {}), ...(inMinutes !== undefined ? { inMinutes } : {}) },
+          args: {
+            actions: inner,
+            fireAt,
+            ...(at !== undefined ? { at } : {}),
+            ...(inMinutes !== undefined ? { inMinutes } : {}),
+          },
         },
       };
     }
@@ -856,7 +930,10 @@ export function describeToolCall(call: ToolCall, ctx: CopilotContext): string {
       const parts: string[] = [];
       if (call.args.mode !== undefined) parts.push(call.args.mode === "off" ? "heat OFF" : `${call.args.mode} ON`);
       if (call.args.setpoint !== undefined) parts.push(`set to ${call.args.setpoint}${deg}`);
-      return `${name} — ${parts.join(", ")}`;
+      // A setpoint alone does nothing while the heater is off — say so on the
+      // card rather than reporting "Done" for a change that can't heat anything.
+      const inert = call.args.mode === undefined && call.args.setpoint !== undefined && body?.heatMode === "off";
+      return `${name} — ${parts.join(", ")}${inert ? " (heat is OFF — this only moves the target)" : ""}`;
     }
     case "run_scene": {
       const scene = ctx.scenes.find((s) => s.id === call.args.sceneId);
@@ -886,12 +963,10 @@ export function describeToolCall(call: ToolCall, ctx: CopilotContext): string {
     }
     case "schedule_once": {
       const inner = call.args.actions.map((a) => describeToolCall(a, ctx)).join("; ");
-      if (call.args.inMinutes !== undefined) {
-        const eta = formatClock(Date.now() + call.args.inMinutes * 60_000);
-        return `In ${formatDuration(call.args.inMinutes)} (≈${eta}): ${inner}`;
-      }
-      const fireAt = call.args.at !== undefined ? resolveAt(call.args.at) : null;
-      const when = fireAt !== null ? formatClock(fireAt) : call.args.at ?? "?";
+      // Always describe the anchored instant — never re-derive it, or the card
+      // and the job it creates can disagree.
+      const when = formatWhen(call.args.fireAt);
+      if (call.args.inMinutes !== undefined) return `In ${formatDuration(call.args.inMinutes)} (${when}): ${inner}`;
       return `At ${when}: ${inner}`;
     }
     case "create_automation": {

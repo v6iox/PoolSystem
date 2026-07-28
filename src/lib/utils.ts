@@ -19,6 +19,25 @@ export function formatClock(at: number, clock: "12" | "24" = "12"): string {
   return formatMinutes(d.getHours() * 60 + d.getMinutes(), clock);
 }
 
+/**
+ * A clock time plus enough date to be unambiguous. "9:00 PM" alone can't tell
+ * tonight from tomorrow night from next Tuesday, which matters a great deal on
+ * a confirmation card that is about to heat a spa.
+ */
+export function formatWhen(at: number, clock: "12" | "24" = "12"): string {
+  const time = formatClock(at, clock);
+  const target = new Date(at);
+  const today = new Date();
+  const midnight = (d: Date): number => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(target) - midnight(today)) / 86_400_000);
+  if (days === 0) return time;
+  if (days === 1) return `${time} tomorrow`;
+  if (days > 1 && days < 7) {
+    return `${time} on ${target.toLocaleDateString(undefined, { weekday: "long" })}`;
+  }
+  return `${time} on ${target.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
 export function formatRelative(at: number): string {
   const diff = Date.now() - at;
   const abs = Math.abs(diff);

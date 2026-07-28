@@ -1,11 +1,23 @@
 import type { ChemReadings, CopilotContext, StatusScope, ToolCall } from "./tools";
-import { allCircuits } from "./tools";
+import { allCircuits, resolveAt } from "./tools";
+import {
+  escapeRegExp,
+  extractRelativePhrase,
+  extractTimePhrase,
+  normalize,
+  parseDays,
+  parseTimeToken,
+  stripRecurrence,
+} from "./nlu";
 
 /**
  * Deterministic intent parser used when MOCK_MODE=true and in CI. Pure
  * regex/keyword matching over the injected context — no DB, no runtime, no
  * network — so the whole copilot pipeline stays testable and demoable without
  * an LLM. The live LLM path produces the exact same ToolCall vocabulary.
+ *
+ * The time/entity primitives live in nlu.ts because the LLM path needs the
+ * same knowledge to ground what the model returns (see grounding.ts).
  */
 
 export interface MockParseResult {
@@ -14,100 +26,6 @@ export interface MockParseResult {
 }
 
 const none: MockParseResult = { calls: [] };
-
-function normalize(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[’‘]/g, "'")
-    .replace(/[!,;]+/g, " ")
-    .replace(/\.(?!\d)/g, " ") // strip periods except decimal points ("ph 7.8")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/* ── time helpers ───────────────────────────────────────────────────────── */
-
-/** "midnight" | "noon" | "8" | "8:30" | "6am" | "11pm" → "HH:MM" (bare hours read as tonight). */
-function parseTimeToken(token: string): string | null {
-  const t = token.trim().toLowerCase();
-  if (t.startsWith("midnight")) return "00:00";
-  if (t.startsWith("noon")) return "12:00";
-  const m = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm|a m|p m)?/.exec(t);
-  if (!m || m[1] === undefined) return null;
-  let hour = Number(m[1]);
-  const minute = m[2] !== undefined ? Number(m[2]) : 0;
-  if (hour > 23 || minute > 59) return null;
-  const meridian = m[3]?.replace(/\s/g, "");
-  if (meridian === "pm" && hour < 12) hour += 12;
-  else if (meridian === "am" && hour === 12) hour = 0;
-  else if (meridian === undefined && hour >= 1 && hour <= 11) hour += 12; // "at 8" tonight semantics
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
-
-const TIME_PHRASE = /\b(?:at|around|by)\s+(midnight|noon|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/;
-
-/** Pull an "at 8pm"-style phrase out of a segment. */
-function extractTimePhrase(segment: string): { at: string | null; rest: string } {
-  const m = TIME_PHRASE.exec(segment);
-  if (!m || m[1] === undefined) return { at: null, rest: segment };
-  const at = parseTimeToken(m[1]);
-  const rest = segment.replace(m[0], " ").replace(/\s+/g, " ").trim();
-  return { at, rest };
-}
-
-const REL_WORDY: Array<[RegExp, number]> = [
-  [/\bin (?:about |around |roughly )?an? hour and a half\b/, 90],
-  [/\bin (?:about |around |roughly )?half an? hour\b/, 30],
-  [/\bin (?:about |around |roughly )?an? hour\b/, 60],
-  [/\bin (?:about |around |roughly )?a couple(?: of)? hours\b/, 120],
-  [/\bin (?:about |around |roughly )?a few hours\b/, 180],
-  [/\bin (?:about |around |roughly )?a minute\b/, 1],
-];
-
-const REL_NUMERIC = /\bin (?:about |around |roughly )?(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|min|m)\b/;
-
-/** Pull an "in 2 hours"-style phrase out of a segment → minutes from now. */
-function extractRelativePhrase(segment: string): { inMinutes: number | null; rest: string } {
-  for (const [re, mins] of REL_WORDY) {
-    const m = re.exec(segment);
-    if (m) return { inMinutes: mins, rest: segment.replace(m[0], " ").replace(/\s+/g, " ").trim() };
-  }
-  const m = REL_NUMERIC.exec(segment);
-  if (m && m[1] !== undefined && m[2] !== undefined) {
-    const n = Number(m[1]);
-    const mins = Math.round(m[2].startsWith("h") ? n * 60 : n);
-    if (mins >= 1) return { inMinutes: mins, rest: segment.replace(m[0], " ").replace(/\s+/g, " ").trim() };
-  }
-  return { inMinutes: null, rest: segment };
-}
-
-const DAY_NAMES: Record<string, number> = {
-  sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
-};
-
-function parseDays(t: string): number[] {
-  if (/\bweekdays?\b/.test(t)) return [1, 2, 3, 4, 5];
-  if (/\bweekends?\b/.test(t)) return [0, 6];
-  if (/\bevery (day|night|morning|evening)\b|\bdaily\b|\bnightly\b/.test(t)) return [];
-  const days = new Set<number>();
-  for (const [name, idx] of Object.entries(DAY_NAMES)) {
-    if (new RegExp(`\\b${name}s?\\b`).test(t)) days.add(idx);
-  }
-  return [...days].sort((a, b) => a - b);
-}
-
-function stripRecurrence(t: string): string {
-  return t
-    .replace(/\b(?:every|on|each)?\s*(sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\b/g, " ")
-    .replace(/\bevery (day|night|morning|evening|week)\b|\bdaily\b|\bnightly\b|\bweekdays?\b|\bweekends?\b/g, " ")
-    .replace(/\bevery\b/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 /* ── sub-parsers ────────────────────────────────────────────────────────── */
 
@@ -403,7 +321,7 @@ export function parseUtterance(text: string, ctx: CopilotContext): MockParseResu
       return {
         calls: [
           { tool: "set_heat", args: { body, mode: "heater" } },
-          { tool: "schedule_once", args: { at, actions: [{ tool: "set_heat", args: { body, mode: "off" } }] } },
+          { tool: "schedule_once", args: { at, fireAt: resolveAt(at) ?? 0, actions: [{ tool: "set_heat", args: { body, mode: "off" } }] } },
         ],
       };
     }
@@ -456,14 +374,14 @@ export function parseUtterance(text: string, ctx: CopilotContext): MockParseResu
     if (rel.inMinutes !== null) {
       const relCalls = parseCommandSegment(rel.rest, ctx);
       if (relCalls.length > 0) {
-        calls.push({ tool: "schedule_once", args: { inMinutes: rel.inMinutes, actions: relCalls } });
+        calls.push({ tool: "schedule_once", args: { inMinutes: rel.inMinutes, fireAt: Date.now() + rel.inMinutes * 60_000, actions: relCalls } });
         continue;
       }
     }
     const { at, rest } = extractTimePhrase(segment);
     const segmentCalls = parseCommandSegment(at !== null ? rest : segment, ctx);
     if (segmentCalls.length === 0) continue;
-    if (at !== null) calls.push({ tool: "schedule_once", args: { at, actions: segmentCalls } });
+    if (at !== null) calls.push({ tool: "schedule_once", args: { at, fireAt: resolveAt(at) ?? 0, actions: segmentCalls } });
     else calls.push(...segmentCalls);
   }
   if (calls.length > 0) return { calls };
