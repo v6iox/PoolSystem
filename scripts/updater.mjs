@@ -26,12 +26,33 @@ const WORKSPACE = "/workspace";
 let busy = false;
 let currentRef = "";
 const log = [];
+/** Progress reporting: phase + 0-100 estimate for the web UI's bar. */
+let phase = "idle";
+let progress = 0;
+let buildSteps = 0;
+// Buildkit prints "#N ..." markers; a Moonpool web build typically emits ~35
+// distinct steps. Used only to pace the bar — completion is signaled by phase.
+const EXPECTED_BUILD_STEPS = 35;
+
+function setPhase(name, pct) {
+  phase = name;
+  progress = pct;
+}
 
 function addLog(line) {
   const stamped = `${new Date().toISOString()} ${line}`;
   log.push(stamped);
   if (log.length > 300) log.splice(0, log.length - 300);
   console.log(stamped);
+  // Advance the build-phase bar as buildkit step markers stream past.
+  if (phase === "build") {
+    const marker = /^\s*#(\d+)\b/.exec(line);
+    if (marker) {
+      buildSteps = Math.max(buildSteps, Number(marker[1]));
+      const frac = Math.min(1, buildSteps / EXPECTED_BUILD_STEPS);
+      progress = Math.max(progress, Math.round(15 + frac * 75)); // build spans 15→90
+    }
+  }
 }
 
 function run(cmd, args, opts = {}) {
@@ -81,18 +102,25 @@ async function localEdits() {
 async function applyUpdate(ref, force) {
   busy = true;
   currentRef = ref;
+  buildSteps = 0;
   try {
+    setPhase("fetch", 2);
     await run("git", ["config", "--global", "--add", "safe.directory", WORKSPACE], { cwd: "/" });
     if (force) addLog("force=true — discarding local edits in /workspace");
     await run("git", ["fetch", "--force", "--tags", "origin"]);
+    setPhase("checkout", 10);
     await run("git", ["checkout", "-f", ref]);
     const compose = await composeArgs();
+    setPhase("build", 15);
     addLog("building web image (this takes a few minutes on a Pi)…");
     await run("docker", [...compose, "build", "web"]);
+    setPhase("restart", 92);
     addLog("restarting web…");
     await run("docker", [...compose, "up", "-d", "--no-deps", "web"]);
+    setPhase("done", 100);
     addLog(`✓ update to ${ref} complete`);
   } catch (err) {
+    setPhase("failed", progress);
     addLog(`✗ update failed: ${err.message}`);
   } finally {
     busy = false;
@@ -108,7 +136,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "GET" && req.url === "/status") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ busy, ref: currentRef, log: log.slice(-60) }));
+    res.end(JSON.stringify({ busy, ref: currentRef, phase, progress, log: log.slice(-60) }));
     return;
   }
   if (req.method === "POST" && req.url === "/update") {
