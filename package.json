@@ -1,6 +1,6 @@
 {
   "name": "moonpool",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "private": true,
   "description": "Moonpool - self-hosted pool control for Pentair panels via nodejs-poolController. Night-swim UI, roles, automations, local AI copilot. Everything on your Pi.",
   "scripts": {
