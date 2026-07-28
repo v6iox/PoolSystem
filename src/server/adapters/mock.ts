@@ -438,6 +438,8 @@ export class MockAdapter implements PoolAdapter {
       solar2: null,
       min: -10,
       max: 10,
+      // The simulator mirrors the touch-panel experience most installs get.
+      appliedBy: "moonpool",
     };
   }
 

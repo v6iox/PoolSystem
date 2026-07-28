@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Minus, Plus, Thermometer } from "lucide-react";
+import { Minus, Monitor, Plus, Scale, Thermometer, Zap } from "lucide-react";
 import { apiGet, apiSend } from "@/lib/client/api";
 import { usePool } from "@/lib/client/pool-state";
 import { toast } from "@/stores/toast";
@@ -27,6 +27,7 @@ interface Calibration {
   solar2: number | null;
   min: number;
   max: number;
+  appliedBy: "moonpool" | "controller";
 }
 
 type Field = "water1" | "water2" | "air" | "solar1" | "solar2";
@@ -117,7 +118,7 @@ export function CalibrationSection(): React.JSX.Element | null {
     <SettingsSection
       icon={<Thermometer size={14} />}
       title="Sensor calibration"
-      description={`Nudge readings to match a trusted thermometer — applied instantly to everything Moonpool shows, logs and automates. The panel's own screen keeps its factory reading (Pentair only allows calibrating that at the panel itself). Range ${cal ? `${cal.min}${unit} to +${cal.max}${unit}` : "±10°"}.`}
+      description={`Nudge readings to match a trusted thermometer. Range ${cal ? `${cal.min}${unit} to +${cal.max}${unit}` : "±10°"}.`}
     >
       {query.isPending ? (
         <div className="p-4">
@@ -129,21 +130,54 @@ export function CalibrationSection(): React.JSX.Element | null {
           not be connected right now.
         </p>
       ) : (
-        rows
-          .filter((r) => r.value !== null)
-          .map((r) => (
-            <SettingRow key={r.field} label={r.label} hint={r.hint}>
-              <Stepper
-                value={r.value as number}
-                min={cal.min}
-                max={cal.max}
-                unit={unit}
-                busy={busyField === r.field || !backendConnected}
-                onChange={(next) => adjust(r.field, next)}
-                label={r.label}
-              />
-            </SettingRow>
-          ))
+        <>
+          {cal.appliedBy === "moonpool" ? (
+            <div className="mx-4 mt-3 space-y-2 rounded-xl border border-line bg-abyss/40 p-3">
+              <p className="flex items-start gap-2 text-xs text-ink-dim">
+                <Zap size={13} className="mt-0.5 shrink-0 text-accent" />
+                <span>
+                  <span className="font-medium text-ink">Applies everywhere in Moonpool, instantly</span> — dials,
+                  history, automations, alerts and the copilot all use the corrected reading.
+                </span>
+              </p>
+              <p className="flex items-start gap-2 text-xs text-ink-dim">
+                <Monitor size={13} className="mt-0.5 shrink-0 text-ink-faint" />
+                <span>
+                  <span className="font-medium text-ink">The panel&apos;s own screen won&apos;t change</span> — its
+                  protocol has no remote-calibration command (a Pentair limit, not a Moonpool one). To correct the
+                  panel display itself, set the offset once in the panel&apos;s own settings menu.
+                </span>
+              </p>
+              <p className="flex items-start gap-2 text-xs text-ink-dim">
+                <Scale size={13} className="mt-0.5 shrink-0 text-warn" />
+                <span>
+                  <span className="font-medium text-ink">Already calibrated at the panel?</span> Then readings arrive
+                  here pre-corrected — leave these at 0, or the correction gets applied twice. Pick one home for each
+                  offset: the panel (fixes every display) or Moonpool (fixes the app only).
+                </span>
+              </p>
+            </div>
+          ) : (
+            <p className="mx-4 mt-3 rounded-xl border border-line bg-abyss/40 p-3 text-xs text-ink-dim">
+              Offsets are applied by the pool controller itself, so every connected display agrees.
+            </p>
+          )}
+          {rows
+            .filter((r) => r.value !== null)
+            .map((r) => (
+              <SettingRow key={r.field} label={r.label} hint={r.hint}>
+                <Stepper
+                  value={r.value as number}
+                  min={cal.min}
+                  max={cal.max}
+                  unit={unit}
+                  busy={busyField === r.field || !backendConnected}
+                  onChange={(next) => adjust(r.field, next)}
+                  label={r.label}
+                />
+              </SettingRow>
+            ))}
+        </>
       )}
     </SettingsSection>
   );

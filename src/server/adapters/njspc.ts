@@ -372,6 +372,7 @@ export class NjspcAdapter implements PoolAdapter {
         solar2: active.has("solar2") ? this.calib.solar2 : null,
         min: -10,
         max: 10,
+        appliedBy: "moonpool",
       };
     }
     // Standalone/Nixie: njsPC genuinely applies its stored calibration, so
@@ -399,6 +400,7 @@ export class NjspcAdapter implements PoolAdapter {
       solar2: val("solarTempAdj2"),
       min: -10,
       max: 10,
+      appliedBy: "controller",
     };
   }
 

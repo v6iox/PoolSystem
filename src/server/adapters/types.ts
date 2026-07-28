@@ -22,6 +22,13 @@ export interface TempCalibration {
   /** Offset bounds in panel units. */
   min: number;
   max: number;
+  /**
+   * Who actually applies these offsets to readings. "moonpool": applied by
+   * this app (touch-family panels — their protocol has no remote-calibration
+   * command, so the panel's own screen is unaffected). "controller": the
+   * controller applies them itself, every connected display agrees.
+   */
+  appliedBy: "moonpool" | "controller";
 }
 
 export interface TempCalibrationInput {
