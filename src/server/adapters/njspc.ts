@@ -188,6 +188,8 @@ export class NjspcAdapter implements PoolAdapter {
   private lightThemes: LightThemeDef[] = [];
   private connected = false;
   private calib: StoredCalib;
+  /** Per-body water offset in effect (bodyId → °), rebuilt on every normalize. */
+  private bodyWaterOffset = new Map<number, number>();
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
@@ -254,7 +256,13 @@ export class NjspcAdapter implements PoolAdapter {
   }
 
   async setSetPoint(bodyId: number, setPoint: number): Promise<void> {
-    await this.put("/state/body/setPoint", { id: bodyId, setPoint });
+    // Setpoints arrive in Moonpool's calibrated space. The PANEL's thermostat
+    // runs on its own uncorrected sensor, so translate: with a -4 offset
+    // (sensor reads 4° high), "heat to 100" writes 104 — the panel's reading
+    // says 104 exactly when the water is truly 100. Without this, heating
+    // would stop 4° short of what the user asked for.
+    const off = this.bodyWaterOffset.get(bodyId) ?? 0;
+    await this.put("/state/body/setPoint", { id: bodyId, setPoint: setPoint - off });
   }
 
   async setPumpSpeed(pumpId: number, rpm: number): Promise<void> {
@@ -855,11 +863,16 @@ export class NjspcAdapter implements PoolAdapter {
     const dualEquipment = bool(equipmentObj.dual);
     const offset = (v: number | null, o: number): number | null => (v === null ? null : v + o);
 
+    const bodyOffsets = new Map<number, number>();
     const bodies: BodyState[] = asArr(temps.bodies).map((b): BodyState => {
       const heatModeName = str(b.heatMode);
       const heatStatusName = str(b.heatStatus).toLowerCase();
       const kind: BodyState["kind"] = str(b.type).toLowerCase().includes("spa") || str(b.name).toLowerCase().includes("spa") ? "spa" : "pool";
       const bodyId = num(b.id);
+      const waterOff = bodyId >= 2 && dualEquipment ? cal.water2 : cal.water1;
+      bodyOffsets.set(bodyId, waterOff);
+      const rawMin = num(b.minSetPoint ?? asObj(b).setPointMin, 60);
+      const rawMax = num(b.maxSetPoint ?? asObj(b).setPointMax, kind === "spa" ? 104 : 95);
       // Heat modes this body actually supports, discovered from config —
       // a system without solar simply never offers solar modes.
       const discovered = (["off", "heater", "solar", "solarpref"] as const).filter((mode) =>
@@ -870,13 +883,17 @@ export class NjspcAdapter implements PoolAdapter {
         name: str(b.name, kind === "spa" ? "Spa" : "Pool"),
         kind,
         isOn: bool(b.isOn),
-        temp: offset(numOrNull(b.temp), bodyId >= 2 && dualEquipment ? cal.water2 : cal.water1),
+        temp: offset(numOrNull(b.temp), waterOff),
         // With the circulation off the sensor isn't in the water flow — the
         // panel just repeats the last reading it saw, which reads as current.
         tempStale: !bool(b.isOn),
-        setPoint: num(b.setPoint, 78),
-        minSetPoint: num(b.minSetPoint ?? asObj(b).setPointMin, 60),
-        maxSetPoint: num(b.maxSetPoint ?? asObj(b).setPointMax, kind === "spa" ? 104 : 95),
+        // Setpoints and their bounds live in calibrated space too, so "heat
+        // to 100" means a TRUE 100 (setSetPoint translates back). The upper
+        // bound never extends past the panel's own ceiling — a positive
+        // offset must not unlock true temps above the scald limit.
+        setPoint: num(b.setPoint, 78) + waterOff,
+        minSetPoint: rawMin + waterOff,
+        maxSetPoint: Math.min(rawMax, rawMax + waterOff),
         heatMode: heatModeFromName(heatModeName),
         // When discovery failed entirely, fall back to the SAFE minimum plus
         // solar only if a solar sensor actually reports — never invent solar.
@@ -896,6 +913,7 @@ export class NjspcAdapter implements PoolAdapter {
         circuitId: num(b.circuit, kind === "spa" ? 1 : 6),
       };
     });
+    this.bodyWaterOffset = bodyOffsets;
 
     const mapCircuit = (c: Json, isFeature: boolean): CircuitState => {
       const typeName = str(c.type).toLowerCase().replace(/[^a-z]/g, "");
