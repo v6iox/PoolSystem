@@ -31,6 +31,17 @@ function LoginForm(): React.JSX.Element {
     setError(null);
     try {
       await apiSend("POST", "/api/auth/login", { email, password });
+      // A 200 only means the server made a session — it doesn't mean the
+      // browser kept the cookie. Confirm before navigating: otherwise a
+      // dropped cookie sends us back to this very page, which React does not
+      // remount, leaving the button spinning on "Diving in…" with nothing to
+      // explain why.
+      const me = await apiGet<{ user?: { id: number } }>("/api/auth/me").catch(() => null);
+      if (!me?.user) {
+        throw new Error(
+          "Signed in, but your browser didn't keep the session cookie. If you're on plain http://, restart Moonpool so it stops marking the cookie Secure — or reach it over https."
+        );
+      }
       router.replace(params.get("next") ?? "/");
       router.refresh();
     } catch (err) {

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { getDb, now } from "@/server/db";
 import type { Role, SessionUser } from "@/types/auth";
 
@@ -63,12 +63,47 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   return getUserByToken(token);
 }
 
+/**
+ * Whether to mark the session cookie `Secure`.
+ *
+ * This must follow the REQUEST, not NODE_ENV. The production image always sets
+ * NODE_ENV=production, but the normal way to run Moonpool is plain HTTP on the
+ * LAN (http://moonpool.local:3000) — and a browser silently discards a
+ * `Secure` cookie on a non-HTTPS origin. The login POST then succeeds, the
+ * session row is written, the cookie evaporates, and the app bounces straight
+ * back to the login screen with no error to show for it.
+ *
+ * So: Secure only when the request actually arrived over TLS. Behind the
+ * Cloudflare tunnel that's x-forwarded-proto; direct TLS sets neither header
+ * and can be forced with SESSION_COOKIE_SECURE=true.
+ */
+export function decideCookieSecure(
+  headerLookup: (name: string) => string | null,
+  override: string | undefined = process.env.SESSION_COOKIE_SECURE
+): boolean {
+  if (override === "true") return true;
+  if (override === "false") return false;
+  const proto = headerLookup("x-forwarded-proto") ?? headerLookup("x-forwarded-protocol");
+  // May be a comma-separated chain — the client-facing hop is first.
+  if (proto) return proto.split(",")[0]?.trim().toLowerCase() === "https";
+  return (headerLookup("origin") ?? headerLookup("referer") ?? "").startsWith("https://");
+}
+
+async function cookieIsSecure(): Promise<boolean> {
+  try {
+    const h = await headers();
+    return decideCookieSecure((name) => h.get(name));
+  } catch {
+    return false;
+  }
+}
+
 export async function setSessionCookie(token: string, expiresAt: number): Promise<void> {
   const store = await cookies();
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: await cookieIsSecure(),
     path: "/",
     expires: new Date(expiresAt),
   });

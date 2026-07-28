@@ -17,7 +17,9 @@ export type AlertKind =
   | "heaterStall"
   | "njspcOffline"
   | "waterLow"
-  | "lightning";
+  | "lightning"
+  | "commandUnconfirmed"
+  | "scheduleMissed";
 
 export const ALERT_LABELS: Record<AlertKind, string> = {
   equipmentFault: "Equipment fault",
@@ -29,6 +31,8 @@ export const ALERT_LABELS: Record<AlertKind, string> = {
   njspcOffline: "Pool controller offline",
   waterLow: "Water level low (estimated)",
   lightning: "Lightning detected nearby",
+  commandUnconfirmed: "Command didn't take effect",
+  scheduleMissed: "Scheduled action missed",
 };
 
 interface VapidKeys {

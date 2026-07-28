@@ -4,13 +4,14 @@ import { audit } from "@/server/audit";
 import { createScheduledJob, executeActions, type ActionContext } from "@/server/control";
 import { reloadAutomations } from "@/server/automations/worker";
 import { estimateWaterLevel, recordRefill } from "@/server/water";
-import { formatClock, formatDays, formatMinutes, formatRelative } from "@/lib/utils";
+import { formatClock, formatDays, formatMinutes, formatRelative, formatWhen } from "@/lib/utils";
 import type { SessionUser } from "@/types/auth";
 import type { Role } from "@/types/auth";
 import type { AutomationTrigger, PoolAction } from "@/types/actions";
 import { CopilotBackendError } from "./llm";
 import { parseWithProvider } from "./provider";
 import { isGreeting } from "./mock-parser";
+import { normalize } from "./nlu";
 import {
   describeToolCall,
   describeTrigger,
@@ -452,7 +453,7 @@ export async function processMessage(
       // Deterministic guard: plain greetings/small talk can never carry
       // actions, whatever a small model hallucinates. Keep its reply, drop
       // any phantom tool calls.
-      if (rawCalls.length > 0 && isGreeting(trimmed.toLowerCase())) {
+      if (rawCalls.length > 0 && isGreeting(normalize(trimmed))) {
         rawCalls = [];
       }
     } catch (err) {
@@ -685,20 +686,14 @@ async function executeToolCall(
     }
 
     case "schedule_once": {
-      const fireAt =
-        call.args.inMinutes !== undefined
-          ? Date.now() + call.args.inMinutes * 60_000
-          : call.args.at !== undefined
-            ? resolveAt(call.args.at)
-            : null;
-      if (fireAt === null || fireAt <= Date.now()) {
-        return { ok: false, line: `Failed: the time "${call.args.at ?? "?"}" is in the past.` };
-      }
+      // fireAt was pinned when the plan was proposed and survived re-validation
+      // in validateToolCall, which also rejects it if it has since passed.
+      const fireAt = call.args.fireAt;
       const actions: PoolAction[] = call.args.actions.flatMap((inner) => toolCallToActions(inner, ctx));
       if (actions.length === 0) return { ok: false, line: "Failed: nothing to schedule." };
       const label = call.args.actions.map((inner) => describeToolCall(inner, ctx)).join("; ");
       createScheduledJob({ label: label.slice(0, 120), actions, fireAt, ctx: actionCtx });
-      return { ok: true, line: `Scheduled for ${formatClock(fireAt)}: ${label}` };
+      return { ok: true, line: `Scheduled for ${formatWhen(fireAt)}: ${label}` };
     }
 
     case "create_automation": {
