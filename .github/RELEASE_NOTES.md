@@ -1,14 +1,23 @@
-## Moonpool v1.0.7 🌙
+## Moonpool v1.0.8 🌙
 
-Patch release. If you're on v1.0.6 with auto-update enabled, this one
-installs itself.
+Quality-of-life release. If you're on v1.0.7 with auto-update enabled, this
+one installs itself.
 
-### Fixed
+### Added
 
-- **Panel clock sync** — "Sync now" failed on real hardware because the
-  date/time message carried a four-digit year into a one-byte protocol
-  field, and the panel rejected the whole frame. The year is now sent
-  two-digit, matching what EasyTouch/IntelliTouch expect on the bus.
+- **Update progress bar** — updates now show a phase-labeled progress bar
+  ("Building the new image — the long part…") with a live percentage that
+  tracks the Docker build, instead of a log crawl on a seemingly frozen
+  page.
+
+### Changed
+
+- **Stay signed in on devices you use** — sessions now renew themselves on
+  every use, on both the server and the cookie, so the phone app never logs
+  you out as long as you open it occasionally. Default window is 90 days
+  (`SESSION_DAYS` to change); only a device untouched that long expires.
+  Pairs perfectly with Tailscale VPN-on-demand or a Cloudflare tunnel for a
+  tap-the-icon-anywhere experience.
 
 ### Install / update
 
