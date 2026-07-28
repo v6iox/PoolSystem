@@ -4,6 +4,7 @@ import {
   escapeRegExp,
   extractRelativePhrase,
   extractTimePhrase,
+  mentionedBodyKind,
   normalize,
   parseDays,
   parseTimeToken,
@@ -203,6 +204,14 @@ function parseCircuitToggles(s: string, ctx: CopilotContext): ToolCall[] {
       matched.push(circuit.id);
       remaining = remaining.replace(re, " ");
     }
+  }
+  // Body synonyms → that body's own circuit: "turn on the hot tub" is the Spa
+  // circuit even though no circuit is literally named "hot tub". Matters most
+  // on Pi installs, where this parser IS the copilot (COPILOT_FORCE_MOCK).
+  if (matched.length === 0) {
+    const kind = mentionedBodyKind(s, ctx);
+    const body = kind !== null ? ctx.snapshot.bodies.find((b) => b.kind === kind) : undefined;
+    if (body && allCircuits(ctx.snapshot).some((c) => c.id === body.circuitId)) matched.push(body.circuitId);
   }
   if (matched.length === 0) return [];
   const off = /\b(off|kill|stop|shut|close|disable)\b/.test(s);
