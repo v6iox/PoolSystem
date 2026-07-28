@@ -19,6 +19,50 @@ import { RESPONSE_JSON_SCHEMA, TOOL_DEFS, allCircuits, toolSignature } from "./t
 // tighter overrides.
 const TIMEOUT_MS = Number(process.env.COPILOT_TIMEOUT_MS ?? "") || 60_000;
 
+/**
+ * Token budget for everything we send. A local backend silently truncates from
+ * the FRONT once the context window fills — which drops the system prompt's
+ * schema and "act only on the newest message" rules and leaves the model
+ * improvising. Measured against qwen3: the system prompt is ~1680 tokens and a
+ * full 8-turn history adds ~500, which overflows a 2048-token window. Rather
+ * than trust the deployment to be configured generously, drop the oldest turns
+ * until the request provably fits.
+ *
+ * Set COPILOT_CONTEXT_TOKENS to match OLLAMA_CONTEXT_LENGTH if you change it.
+ */
+const CONTEXT_TOKENS = Number(process.env.COPILOT_CONTEXT_TOKENS ?? "") || 4096;
+/** Headroom left for the model's own JSON answer. */
+const RESERVED_OUTPUT_TOKENS = 512;
+
+/** Chars-per-token on this prompt shape, measured at ~3.6 for Qwen; 3.2 is a safe margin. */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 3.2);
+}
+
+/**
+ * Trim history from the oldest end until system + history + user fits the
+ * budget. The newest turns are the ones that resolve "make it 3 hours instead".
+ */
+export function fitHistory(
+  system: string,
+  history: Array<{ role: string; content: string }>,
+  user: string,
+  budget: number = CONTEXT_TOKENS - RESERVED_OUTPUT_TOKENS
+): Array<{ role: string; content: string }> {
+  const fixed = estimateTokens(system) + estimateTokens(user);
+  const kept: Array<{ role: string; content: string }> = [];
+  let used = fixed;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const turn = history[i];
+    if (!turn) continue;
+    const cost = estimateTokens(turn.content) + 4; // role/format overhead
+    if (used + cost > budget) break;
+    used += cost;
+    kept.unshift(turn);
+  }
+  return kept;
+}
+
 export class CopilotBackendError extends Error {
   constructor(message: string) {
     super(message);
@@ -113,13 +157,14 @@ export async function parseWithLlm(text: string, ctx: CopilotContext, overrides:
         model,
         temperature: 0,
         stream: false,
-        messages: [
-          { role: "system", content: buildSystemPrompt(ctx) },
-          ...(ctx.history ?? []).map((h) => ({ role: h.role, content: h.content })),
+        messages: (() => {
+          const system = buildSystemPrompt(ctx);
           // Qwen3 soft-switch: skip the long thinking phase — structured tool
           // calls don't benefit and a 1.7B model can think past any timeout.
-          { role: "user", content: /qwen3/i.test(model) ? `${text} /no_think` : text },
-        ],
+          const user = /qwen3/i.test(model) ? `${text} /no_think` : text;
+          const history = fitHistory(system, ctx.history ?? [], user);
+          return [{ role: "system", content: system }, ...history, { role: "user", content: user }];
+        })(),
         // strict:false — OpenAI's strict mode rejects optional properties, and
         // Ollama's grammar enforcement only needs the coarse shape.
         response_format: {

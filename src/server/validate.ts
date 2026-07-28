@@ -89,9 +89,14 @@ export function validateTriggerShape(value: unknown): string | null {
       if (typeof x.expression !== "string" || x.expression.trim().length === 0) return "cron.expression required";
       return null;
     }
+    // days and offsetMinutes are optional in the tool schema and the prompt, so
+    // a model that omits them is behaving correctly. Fill the documented
+    // defaults ([] = every day, no offset) rather than rejecting the single
+    // most common recurring request ("turn the cleaner on at 9 every day").
     case "time": {
       const x = t as { at?: unknown; days?: unknown };
       if (typeof x.at !== "string" || !/^\d{1,2}:\d{2}$/.test(x.at)) return "time.at must be HH:MM";
+      if (x.days === undefined || x.days === null) x.days = [];
       if (!Array.isArray(x.days) || x.days.some((d) => typeof d !== "number" || d < 0 || d > 6)) {
         return "time.days must be an array of 0–6";
       }
@@ -100,9 +105,11 @@ export function validateTriggerShape(value: unknown): string | null {
     case "sun": {
       const x = t as { event?: unknown; offsetMinutes?: unknown; days?: unknown };
       if (x.event !== "sunrise" && x.event !== "sunset") return "sun.event must be sunrise|sunset";
+      if (x.offsetMinutes === undefined || x.offsetMinutes === null) x.offsetMinutes = 0;
       if (typeof x.offsetMinutes !== "number" || Math.abs(x.offsetMinutes) > 360) {
         return "sun.offsetMinutes must be within ±360";
       }
+      if (x.days === undefined || x.days === null) x.days = [];
       if (!Array.isArray(x.days) || x.days.some((d) => typeof d !== "number" || d < 0 || d > 6)) {
         return "sun.days must be an array of 0–6";
       }
