@@ -4,7 +4,14 @@ import { getDb, now } from "@/server/db";
 import type { Role, SessionUser } from "@/types/auth";
 
 const SESSION_COOKIE = "mp_session";
-const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days, sliding
+/**
+ * Sliding session lifetime (default 90 days, SESSION_DAYS to change). Any use
+ * of the app renews both the DB row and the cookie, so a device that opens
+ * Moonpool even occasionally stays signed in indefinitely — the phone app
+ * should never greet its owner with a login screen. Only a device that goes
+ * completely unused for the whole window expires.
+ */
+const SESSION_TTL_MS = (Number(process.env.SESSION_DAYS ?? "") || 90) * 86400_000;
 
 interface UserRow {
   id: number;
@@ -61,6 +68,33 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const token = store.get(SESSION_COOKIE)?.value;
   if (!token) return null;
   return getUserByToken(token);
+}
+
+/** Current DB-side expiry for a session token (already slid by getUserByToken). */
+export function getSessionExpiry(token: string): number | null {
+  const row = getDb().prepare("SELECT expires_at FROM sessions WHERE token_hash = ?").get(hashToken(token)) as
+    | { expires_at: number }
+    | undefined;
+  return row?.expires_at ?? null;
+}
+
+/**
+ * Re-issue the session cookie so its browser-side expiry tracks the sliding
+ * DB expiry. Without this the DB row renews forever but the BROWSER deletes
+ * the cookie at the original expiry — the bug that logs the phone app out.
+ * Callable only where Next allows cookie writes (route handlers).
+ */
+export async function refreshSessionCookie(): Promise<void> {
+  try {
+    const store = await cookies();
+    const token = store.get(SESSION_COOKIE)?.value;
+    if (!token) return;
+    const expiresAt = getSessionExpiry(token);
+    if (expiresAt === null) return;
+    await setSessionCookie(token, expiresAt);
+  } catch {
+    // Server-component context (no cookie writes) — API traffic covers renewal.
+  }
 }
 
 /**

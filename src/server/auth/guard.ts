@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionUser } from "@/server/auth/session";
+import { getSessionUser, refreshSessionCookie } from "@/server/auth/session";
 import { roleAtLeast, type Role, type SessionUser } from "@/types/auth";
 
 /**
@@ -16,6 +16,9 @@ export async function requireUser(minRole: Role = "guest"): Promise<
   if (!roleAtLeast(user.role, minRole)) {
     return { ok: false, response: NextResponse.json({ error: "Insufficient permissions" }, { status: 403 }) };
   }
+  // Keep the cookie's expiry in step with the sliding DB session, so a device
+  // that uses the app stays signed in indefinitely.
+  await refreshSessionCookie();
   return { ok: true, user };
 }
 
