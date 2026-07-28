@@ -32,6 +32,90 @@ export interface TempCalibrationInput {
   solar2?: number;
 }
 
+/* ── advanced panel configuration (the "everything else" njsPC exposes) ── */
+
+export interface AdvancedCircuitConfig {
+  id: number;
+  name: string;
+  typeVal: number | null;
+  typeName: string;
+  /** Egg timer minutes; null = none configured. */
+  eggTimer: number | null;
+  freeze: boolean;
+  showInFeatures: boolean;
+}
+
+export interface CircuitFunctionDef {
+  val: number;
+  name: string;
+  isLight: boolean;
+}
+
+export interface AdvancedPumpCircuit {
+  circuitId: number;
+  circuitName: string;
+  speed: number;
+  units: "rpm" | "gpm";
+}
+
+export interface AdvancedPump {
+  id: number;
+  name: string;
+  typeName: string;
+  minSpeed: number;
+  maxSpeed: number;
+  circuits: AdvancedPumpCircuit[];
+}
+
+export interface AdvancedLightGroup {
+  id: number;
+  name: string;
+  circuitIds: number[];
+}
+
+export interface AdvancedHeater {
+  id: number;
+  name: string;
+  typeName: string;
+  bodyDesc: string;
+  coolingEnabled: boolean | null;
+}
+
+export interface AdvancedValve {
+  id: number;
+  name: string;
+  typeName: string;
+  circuitId: number | null;
+  circuitName: string;
+}
+
+export interface PanelClock {
+  /** e.g. "manual" | "server" | "internet" — whatever the panel reports. */
+  source: string;
+  mode: "12h" | "24h" | "unknown";
+  serverTime: string;
+}
+
+export interface AdvancedOptions {
+  circuits: AdvancedCircuitConfig[];
+  circuitFunctions: CircuitFunctionDef[];
+  pumps: AdvancedPump[];
+  lightGroups: AdvancedLightGroup[];
+  lightCircuitIds: number[];
+  heaters: AdvancedHeater[];
+  valves: AdvancedValve[];
+  clock: PanelClock;
+}
+
+export interface CircuitConfigInput {
+  id: number;
+  name?: string;
+  type?: number;
+  eggTimer?: number;
+  freeze?: boolean;
+  showInFeatures?: boolean;
+}
+
 export interface PoolAdapter {
   readonly kind: "mock" | "njspc";
   start(): Promise<void>;
@@ -52,6 +136,13 @@ export interface PoolAdapter {
   deleteSchedule(scheduleId: number): Promise<void>;
   getTempCalibration(): Promise<TempCalibration>;
   setTempCalibration(input: TempCalibrationInput): Promise<void>;
+  getAdvancedOptions(): Promise<AdvancedOptions>;
+  setCircuitConfig(input: CircuitConfigInput): Promise<void>;
+  setPumpCircuitSpeed(pumpId: number, circuitId: number, speed: number): Promise<void>;
+  setLightGroup(id: number, patch: { name?: string; circuitIds?: number[] }): Promise<void>;
+  setValveName(id: number, name: string): Promise<void>;
+  syncPanelClock(): Promise<void>;
+  cancelDelay(): Promise<void>;
 }
 
 export class AdapterError extends Error {

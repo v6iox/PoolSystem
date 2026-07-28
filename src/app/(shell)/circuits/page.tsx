@@ -9,6 +9,7 @@ import { AllOffButton } from "@/components/circuits/all-off-button";
 import { patchCircuitWithBody } from "@/components/circuits/optimistic";
 import { roleAtLeast } from "@/types/auth";
 import type { CircuitState, LightThemeDef } from "@/types/pool";
+import { CircuitsAdvanced } from "@/components/advanced/panels";
 
 const GRID = "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4";
 
@@ -88,6 +89,8 @@ export default function CircuitsPage(): React.JSX.Element {
           ))}
         </div>
       )}
+
+      <CircuitsAdvanced />
     </div>
   );
 }

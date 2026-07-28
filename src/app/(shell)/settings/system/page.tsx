@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { usePool } from "@/lib/client/pool-state";
 import { PageHeader, Panel, Skeleton } from "@/components/ui/panel";
+import { SystemAdvanced } from "@/components/advanced/panels";
 import {
   SettingRow,
   SettingsSection,
@@ -173,6 +174,8 @@ export default function SystemSettingsPage(): React.JSX.Element {
               the RS-485 link dropped — Moonpool reconnects automatically and re-enables controls the
               moment state starts flowing again.
             </Panel>
+
+            <SystemAdvanced />
           </>
         )}
       </div>

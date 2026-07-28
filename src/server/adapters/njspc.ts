@@ -13,7 +13,20 @@ import type {
   ScheduleInput,
   ScheduleState,
 } from "@/types/pool";
-import { AdapterError, type PoolAdapter, type TempCalibration, type TempCalibrationInput } from "./types";
+import {
+  AdapterError,
+  type AdvancedCircuitConfig,
+  type AdvancedHeater,
+  type AdvancedLightGroup,
+  type AdvancedOptions,
+  type AdvancedPump,
+  type AdvancedValve,
+  type CircuitConfigInput,
+  type CircuitFunctionDef,
+  type PoolAdapter,
+  type TempCalibration,
+  type TempCalibrationInput,
+} from "./types";
 
 /**
  * Adapter for nodejs-poolController (njsPC). REST for reads/writes, Socket.IO
@@ -300,6 +313,156 @@ export class NjspcAdapter implements PoolAdapter {
     this.scheduleRefresh();
   }
 
+  // ── advanced panel configuration ─────────────────────────────────
+
+  async getAdvancedOptions(): Promise<AdvancedOptions> {
+    // Each area comes from its own njsPC options endpoint; any one failing
+    // (older builds, odd equipment) just leaves that area empty.
+    const opt = async (path: string): Promise<Json> => asObj(await this.get(path).catch(() => ({})));
+    const [circuitsOpt, pumpsOpt, lightsOpt, heatersOpt, valvesOpt, generalOpt] = await Promise.all([
+      opt("/config/options/circuits"),
+      opt("/config/options/pumps"),
+      opt("/config/options/lightGroups"),
+      opt("/config/options/heaters"),
+      opt("/config/options/valves"),
+      opt("/config/options/general"),
+    ]);
+
+    const circuitName = (id: number): string =>
+      [...this.snapshot.circuits, ...this.snapshot.features].find((c) => c.id === id)?.name ?? `Circuit ${id}`;
+
+    const circuits: AdvancedCircuitConfig[] = asArr(circuitsOpt.circuits).map((c) => ({
+      id: num(c.id),
+      name: str(c.name, `Circuit ${num(c.id)}`),
+      typeVal: numOrNull(asObj(c.type).val ?? c.type),
+      typeName: str(c.type, "generic"),
+      eggTimer: numOrNull(c.eggTimer),
+      freeze: bool(c.freeze),
+      showInFeatures: c.showInFeatures === undefined ? true : bool(c.showInFeatures),
+    }));
+
+    const circuitFunctions: CircuitFunctionDef[] = asArr(circuitsOpt.functions).map((f) => {
+      const name = str(f.desc, str(f.name, `Function ${num(f.val)}`));
+      const key = str(f.name).toLowerCase().replace(/[^a-z]/g, "");
+      return { val: num(f.val), name, isLight: LIGHT_TYPES.has(key) || bool(f.isLight) };
+    });
+
+    const pumps: AdvancedPump[] = asArr(pumpsOpt.pumps).map((p) => {
+      const type = asObj(p.type);
+      return {
+        id: num(p.id),
+        name: str(p.name, `Pump ${num(p.id)}`),
+        typeName: str(p.type, "pump"),
+        minSpeed: num(type.minSpeed, 450),
+        maxSpeed: num(type.maxSpeed, 3450),
+        circuits: asArr(p.circuits).map((pc) => {
+          const cid = num(asObj(pc.circuit).id ?? pc.circuit);
+          const unitsName = str(asObj(pc.units).name ?? pc.units).toLowerCase();
+          return {
+            circuitId: cid,
+            circuitName: str(asObj(pc.circuit).name, circuitName(cid)),
+            speed: num(pc.flow !== undefined && unitsName.includes("gpm") ? pc.flow : pc.speed),
+            units: unitsName.includes("gpm") ? ("gpm" as const) : ("rpm" as const),
+          };
+        }),
+      };
+    });
+
+    const lightGroups: AdvancedLightGroup[] = asArr(lightsOpt.lightGroups ?? lightsOpt.groups).map((g) => ({
+      id: num(g.id),
+      name: str(g.name, `Group ${num(g.id)}`),
+      circuitIds: asArr(g.circuits).map((gc) => num(asObj(gc.circuit).id ?? gc.circuit)),
+    }));
+
+    const lightCircuitIds = [...this.snapshot.circuits, ...this.snapshot.features]
+      .filter((c) => c.isLight)
+      .map((c) => c.id);
+
+    const heaters: AdvancedHeater[] = asArr(heatersOpt.heaters).map((h) => ({
+      id: num(h.id),
+      name: str(h.name, `Heater ${num(h.id)}`),
+      typeName: str(h.type, "heater"),
+      bodyDesc: str(asObj(h.body).desc ?? h.body, ""),
+      coolingEnabled: typeof h.coolingEnabled === "boolean" ? h.coolingEnabled : null,
+    }));
+
+    const valves: AdvancedValve[] = asArr(valvesOpt.valves).map((v) => {
+      const cid = numOrNull(asObj(v.circuit).id ?? v.circuit);
+      return {
+        id: num(v.id),
+        name: str(v.name, `Valve ${num(v.id)}`),
+        typeName: str(v.type, "valve"),
+        circuitId: cid,
+        circuitName: cid !== null ? circuitName(cid) : "",
+      };
+    });
+
+    const clockMode = num(asObj(generalOpt.clockMode).val ?? generalOpt.clockMode, 0);
+    return {
+      circuits,
+      circuitFunctions,
+      pumps,
+      lightGroups,
+      lightCircuitIds,
+      heaters,
+      valves,
+      clock: {
+        source: str(generalOpt.clockSource, "manual") || "manual",
+        mode: clockMode === 24 ? "24h" : clockMode === 12 ? "12h" : "unknown",
+        serverTime: new Date().toISOString(),
+      },
+    };
+  }
+
+  async setCircuitConfig(input: CircuitConfigInput): Promise<void> {
+    const payload: Json = { id: input.id };
+    if (input.name !== undefined) payload.name = input.name;
+    if (input.type !== undefined) payload.type = input.type;
+    if (input.eggTimer !== undefined) payload.eggTimer = input.eggTimer;
+    if (input.freeze !== undefined) payload.freeze = input.freeze;
+    if (input.showInFeatures !== undefined) payload.showInFeatures = input.showInFeatures;
+    await this.put("/config/circuit", payload);
+    this.scheduleRefresh();
+  }
+
+  async setPumpCircuitSpeed(pumpId: number, circuitId: number, speed: number): Promise<void> {
+    await this.put("/config/pumpCircuit", { pumpId, circuitId, speed });
+    this.scheduleRefresh();
+  }
+
+  async setLightGroup(id: number, patch: { name?: string; circuitIds?: number[] }): Promise<void> {
+    const payload: Json = { id };
+    if (patch.name !== undefined) payload.name = patch.name;
+    if (patch.circuitIds !== undefined) {
+      payload.circuits = patch.circuitIds.map((cid, i) => ({ id: i + 1, circuit: cid }));
+    }
+    await this.put("/config/lightGroup", payload);
+    this.scheduleRefresh();
+  }
+
+  async setValveName(id: number, name: string): Promise<void> {
+    await this.put("/config/valve", { id, name });
+  }
+
+  async syncPanelClock(): Promise<void> {
+    // EasyTouch/IntelliTouch dateTime payload; dow is the panel's day bitmask
+    // (Sunday=1 … Saturday=64), year is normalized board-side.
+    const d = new Date();
+    await this.put("/config/dateTime", {
+      hour: d.getHours(),
+      min: d.getMinutes(),
+      date: d.getDate(),
+      month: d.getMonth() + 1,
+      year: d.getFullYear(),
+      dow: 1 << d.getDay(),
+    });
+  }
+
+  async cancelDelay(): Promise<void> {
+    await this.put("/state/cancelDelay", {});
+    this.scheduleRefresh();
+  }
+
   // ── fetch/normalize ──────────────────────────────────────────────
 
   /** heat mode value lookup discovered from config: "bodyId:mode" → panel val */
@@ -379,14 +542,23 @@ export class NjspcAdapter implements PoolAdapter {
     if (byVal.size > 0) this.lightThemes = [...byVal.values()];
   }
 
+  /** Body ids whose heat modes were positively discovered (not guessed). */
+  private heatModesKnown = new Set<number>();
+
   private async loadHeatModes(): Promise<void> {
+    // Authoritative source: /config/body/:id/heatModes — exactly the modes the
+    // panel offers for that body, so a solar-less system never shows solar.
     try {
       const config = asObj(await this.get("/config/all"));
       for (const body of asArr(asObj(config.temps).bodies)) {
         const id = num(body.id);
-        for (const m of asArr(body.heatModes ?? asObj(config).heatModes)) {
+        if (this.heatModesKnown.has(id)) continue;
+        let modes = asArr(await this.get(`/config/body/${id}/heatModes`).catch(() => null));
+        if (modes.length === 0) modes = asArr(body.heatModes ?? asObj(config).heatModes);
+        for (const m of modes) {
           this.heatModeVals.set(`${id}:${heatModeFromName(str(m.name, str(m.desc)))}`, num(m.val));
         }
+        if (modes.length > 0) this.heatModesKnown.add(id);
       }
     } catch {
       // keep name-based fallback
@@ -417,7 +589,14 @@ export class NjspcAdapter implements PoolAdapter {
         minSetPoint: num(b.minSetPoint ?? asObj(b).setPointMin, 60),
         maxSetPoint: num(b.maxSetPoint ?? asObj(b).setPointMax, kind === "spa" ? 104 : 95),
         heatMode: heatModeFromName(heatModeName),
-        supportedHeatModes: discovered.length >= 2 ? [...discovered] : ["off", "heater", "solar", "solarpref"],
+        // When discovery failed entirely, fall back to the SAFE minimum plus
+        // solar only if a solar sensor actually reports — never invent solar.
+        supportedHeatModes:
+          discovered.length >= 2
+            ? [...discovered]
+            : numOrNull(temps.solar) !== null
+              ? ["off", "heater", "solar", "solarpref"]
+              : ["off", "heater"],
         heatStatus: heatStatusName.includes("solar")
           ? "solar"
           : heatStatusName.includes("cool")

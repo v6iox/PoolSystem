@@ -7,6 +7,7 @@ import { TempDial } from "@/components/pool/temp-dial";
 import { useAdvisoryGate } from "@/components/pool/advisory-gate";
 import { AskBar } from "@/components/ask/ask-bar";
 import { WidgetGrid } from "@/components/widgets/widget-grid";
+import { DelayBanner } from "@/components/advanced/panels";
 import { Panel, Skeleton } from "@/components/ui/panel";
 import { roleAtLeast } from "@/types/auth";
 import { cn, formatRelative } from "@/lib/utils";
@@ -153,7 +154,10 @@ export default function DashboardPage(): React.JSX.Element {
   return (
     <div className="space-y-8">
       <AskBar />
-      <Hero />
+      <div>
+        <DelayBanner />
+        <Hero />
+      </div>
       <WidgetGrid />
     </div>
   );

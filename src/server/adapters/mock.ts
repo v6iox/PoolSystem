@@ -11,7 +11,14 @@ import type {
   ScheduleInput,
   ScheduleState,
 } from "@/types/pool";
-import { AdapterError, type PoolAdapter, type TempCalibration, type TempCalibrationInput } from "./types";
+import {
+  AdapterError,
+  type AdvancedOptions,
+  type CircuitConfigInput,
+  type PoolAdapter,
+  type TempCalibration,
+  type TempCalibrationInput,
+} from "./types";
 
 /**
  * Full pool simulator for MOCK_MODE. Models a realistic EasyTouch system:
@@ -132,6 +139,22 @@ export class MockAdapter implements PoolAdapter {
   private freezeProtect = false;
   /** Sensor calibration offsets, applied to every reported reading. */
   private calib = { water1: 0, air: 0, solar1: 0 };
+
+  /** Advanced panel-config emulation so the UI is fully testable in mock. */
+  private circuitAdv = new Map<number, { eggTimer: number | null; freeze: boolean }>([
+    [5, { eggTimer: 120, freeze: false }],
+    [6, { eggTimer: null, freeze: true }],
+  ]);
+  private pumpPrograms = new Map<number, number>([
+    [6, 2600],
+    [1, 2200],
+    [5, 3000],
+    [2, 2400],
+  ]);
+  private valves = [
+    { id: 1, name: "Intake", typeName: "standard", circuitId: 1 as number | null },
+    { id: 2, name: "Return", typeName: "standard", circuitId: 1 as number | null },
+  ];
 
   async start(): Promise<void> {
     if (this.timer) return;
@@ -382,6 +405,97 @@ export class MockAdapter implements PoolAdapter {
     if (input.air !== undefined) this.calib.air = clamp(input.air);
     if (input.solar1 !== undefined) this.calib.solar1 = clamp(input.solar1);
     this.emit();
+  }
+
+  // ── advanced panel configuration (simulated) ─────────────────────
+
+  async getAdvancedOptions(): Promise<AdvancedOptions> {
+    const name = (id: number): string => this.circuitById(id)?.name ?? `Circuit ${id}`;
+    return {
+      circuits: this.circuits.map((c) => ({
+        id: c.id,
+        name: c.name,
+        typeVal: null,
+        typeName: c.type,
+        eggTimer: this.circuitAdv.get(c.id)?.eggTimer ?? null,
+        freeze: this.circuitAdv.get(c.id)?.freeze ?? false,
+        showInFeatures: c.showInFeatures,
+      })),
+      circuitFunctions: [
+        { val: 0, name: "Generic", isLight: false },
+        { val: 5, name: "Master Cleaner", isLight: false },
+        { val: 7, name: "Light", isLight: true },
+        { val: 16, name: "IntelliBrite", isLight: true },
+        { val: 12, name: "Pool", isLight: false },
+        { val: 1, name: "Spa", isLight: false },
+      ],
+      pumps: [
+        {
+          id: this.pump.id,
+          name: this.pump.name,
+          typeName: "vs",
+          minSpeed: this.pump.minSpeed,
+          maxSpeed: this.pump.maxSpeed,
+          circuits: [...this.pumpPrograms.entries()].map(([circuitId, speed]) => ({
+            circuitId,
+            circuitName: name(circuitId),
+            speed,
+            units: "rpm" as const,
+          })),
+        },
+      ],
+      lightGroups: [{ id: this.lightGroup.id, name: this.lightGroup.name, circuitIds: [...this.lightGroup.circuitIds] }],
+      lightCircuitIds: this.circuits.filter((c) => c.isLight).map((c) => c.id),
+      heaters: [{ id: 1, name: "Gas Heater", typeName: "gas", bodyDesc: "Pool & Spa", coolingEnabled: null }],
+      valves: this.valves.map((v) => ({ ...v, circuitName: v.circuitId !== null ? name(v.circuitId) : "" })),
+      clock: { source: "server", mode: "12h", serverTime: new Date().toISOString() },
+    };
+  }
+
+  async setCircuitConfig(input: CircuitConfigInput): Promise<void> {
+    const circuit = this.circuitById(input.id);
+    if (!circuit) throw new AdapterError(`Circuit ${input.id} not found`, 404);
+    if (input.name !== undefined && input.name.trim()) circuit.name = input.name.trim().slice(0, 24);
+    if (input.showInFeatures !== undefined) circuit.showInFeatures = input.showInFeatures;
+    const adv = this.circuitAdv.get(input.id) ?? { eggTimer: null, freeze: false };
+    if (input.eggTimer !== undefined) adv.eggTimer = input.eggTimer > 0 ? Math.round(input.eggTimer) : null;
+    if (input.freeze !== undefined) adv.freeze = input.freeze;
+    this.circuitAdv.set(input.id, adv);
+    this.emit();
+  }
+
+  async setPumpCircuitSpeed(pumpId: number, circuitId: number, speed: number): Promise<void> {
+    if (pumpId !== this.pump.id) throw new AdapterError(`Pump ${pumpId} not found`, 404);
+    if (speed < this.pump.minSpeed || speed > this.pump.maxSpeed) {
+      throw new AdapterError(`Speed must be ${this.pump.minSpeed}–${this.pump.maxSpeed} RPM`, 400);
+    }
+    this.pumpPrograms.set(circuitId, Math.round(speed));
+    if (this.circuitById(circuitId)?.isOn) this.pump.targetRpm = Math.round(speed);
+    this.emit();
+  }
+
+  async setLightGroup(id: number, patch: { name?: string; circuitIds?: number[] }): Promise<void> {
+    if (id !== this.lightGroup.id) throw new AdapterError(`Light group ${id} not found`, 404);
+    if (patch.name !== undefined && patch.name.trim()) this.lightGroup.name = patch.name.trim().slice(0, 24);
+    if (patch.circuitIds !== undefined) {
+      this.lightGroup.circuitIds = patch.circuitIds.filter((cid) => this.circuitById(cid)?.isLight);
+    }
+    this.emit();
+  }
+
+  async setValveName(id: number, name: string): Promise<void> {
+    const valve = this.valves.find((v) => v.id === id);
+    if (!valve) throw new AdapterError(`Valve ${id} not found`, 404);
+    if (name.trim()) valve.name = name.trim().slice(0, 24);
+    this.emit();
+  }
+
+  async syncPanelClock(): Promise<void> {
+    // The simulator's clock is the server clock — nothing to do.
+  }
+
+  async cancelDelay(): Promise<void> {
+    // The simulator never delays; treat as success.
   }
 
   async deleteSchedule(scheduleId: number): Promise<void> {
