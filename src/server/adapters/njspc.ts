@@ -74,6 +74,53 @@ function bool(v: unknown): boolean {
   return false;
 }
 
+/**
+ * Panel-level delay byte + per-body/circuit flags → active flag and human
+ * names.
+ *
+ * EasyTouch reports the delay byte as 32 | flags — 32 alone IS the normal
+ * "no delay" state (njsPC maps both 0 and 32 to "nodelay"; 34 = heater
+ * cooldown, 36 = valve turn, 38 = freeze). Treating any nonzero value as an
+ * active delay shows a permanent banner that Skip can never clear: cancel
+ * writes nodelay, and the panel's next status packet restores 32.
+ */
+export function parseDelayState(state: Json): { delay: boolean; delays: string[] } {
+  const out: string[] = [];
+  const raw = state.delay;
+  // For display prefer desc ("Heater Cooldown Delay") over name ("heaterdelay").
+  const label = (() => {
+    const o = asObj(raw);
+    if (typeof o.desc === "string" && o.desc) return o.desc;
+    if (typeof o.name === "string" && o.name) return o.name;
+    return typeof raw === "string" ? raw : "";
+  })();
+  let panelActive: boolean;
+  if (label) {
+    panelActive = label.toLowerCase().replace(/[^a-z]/g, "") !== "nodelay";
+    if (panelActive) out.push(label);
+  } else if (typeof raw === "boolean") {
+    panelActive = raw;
+    if (panelActive) out.push("Panel delay");
+  } else {
+    const v = num(asObj(raw).val, num(raw, 0));
+    panelActive = v !== 0 && v !== 32;
+    if (panelActive) {
+      out.push({ 34: "Heater cooldown delay", 36: "Valve delay", 38: "Freeze delay" }[v] ?? "Panel delay");
+    }
+  }
+  for (const b of asArr(asObj(state.temps).bodies)) {
+    const name = str(b.name, `body ${num(b.id)}`);
+    if (bool(b.heaterCooldownDelay)) out.push(`${name} heater cool-down`);
+    if (bool(b.startDelay)) out.push(`${name} start delay`);
+    if (bool(b.stopDelay)) out.push(`${name} stop delay`);
+  }
+  for (const c of [...asArr(state.circuits), ...asArr(state.features)]) {
+    if (bool(c.startDelay)) out.push(`${str(c.name, `circuit ${num(c.id)}`)} start delay`);
+    if (bool(c.stopDelay)) out.push(`${str(c.name, `circuit ${num(c.id)}`)} stop delay`);
+  }
+  return { delay: panelActive || out.length > 0, delays: out };
+}
+
 function heatModeFromName(name: string): HeatMode {
   const n = name.toLowerCase().replace(/[^a-z]/g, "");
   if (n.includes("solarpref") || n.includes("solarpreferred")) return "solarpref";
@@ -900,18 +947,7 @@ export class NjspcAdapter implements PoolAdapter {
       airTemp: numOrNull(temps.air),
       solarTemp: numOrNull(temps.solar),
       freezeProtect: bool(state.freeze),
-      delay: bool(state.delay) || num(asObj(state.delay).val) > 0,
-      // Which delays, not just "a delay": panel-level desc + per-circuit flags.
-      delays: (() => {
-        const out: string[] = [];
-        const panelDelay = str(state.delay).toLowerCase();
-        if (panelDelay && panelDelay !== "nodelay" && panelDelay !== "no delay") out.push(str(state.delay));
-        for (const c of [...asArr(state.circuits), ...asArr(state.features)]) {
-          if (bool(c.startDelay)) out.push(`${str(c.name, `circuit ${num(c.id)}`)} start delay`);
-          if (bool(c.stopDelay)) out.push(`${str(c.name, `circuit ${num(c.id)}`)} stop delay`);
-        }
-        return out;
-      })(),
+      ...parseDelayState(state),
       panelMode,
       bodies,
       circuits,
