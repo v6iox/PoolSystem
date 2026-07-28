@@ -30,6 +30,7 @@ export function HeatBodyPanel({ body, index }: { body: BodyState; index: number 
   const { gate, dialog } = useAdvisoryGate();
 
   const heating = body.heatStatus !== "off";
+  const stale = body.tempStale === true;
   const solarActive = body.heatStatus === "solar";
   const cooling = body.heatStatus === "cooling";
   const solarTemp = snapshot.solarTemp;
@@ -73,7 +74,7 @@ export function HeatBodyPanel({ body, index }: { body: BodyState; index: number 
 
         <TempDial
           label={body.name}
-          temp={body.temp}
+          temp={stale ? null : body.temp}
           setPoint={body.setPoint}
           min={body.minSetPoint}
           max={body.maxSetPoint}
@@ -110,8 +111,15 @@ export function HeatBodyPanel({ body, index }: { body: BodyState; index: number 
           }
         />
 
-        {body.temp !== null && typeof body.tempChangedAt === "number" && (
-          <p className="mb-1 text-[11px] text-ink-faint/70">reading updated {formatRelative(body.tempChangedAt)}</p>
+        {stale ? (
+          <p className="mb-1 text-[11px] text-ink-faint/70">
+            no live reading — pump off{body.temp !== null ? ` (last ${Math.round(body.temp)}°${snapshot.units})` : ""}
+          </p>
+        ) : (
+          body.temp !== null &&
+          typeof body.tempChangedAt === "number" && (
+            <p className="mb-1 text-[11px] text-ink-faint/70">reading updated {formatRelative(body.tempChangedAt)}</p>
+          )
         )}
 
         {/* Status chips — fixed min height so appearing/disappearing doesn't jump the layout. */}

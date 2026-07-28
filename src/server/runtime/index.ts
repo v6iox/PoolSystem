@@ -213,7 +213,9 @@ export class Runtime {
     const tx = db.transaction(() => {
       if (snap.airTemp !== null) insert.run(at, "temp:air", snap.airTemp);
       for (const b of snap.bodies) {
-        if (b.temp !== null) insert.run(at, `temp:body:${b.id}`, b.temp);
+        // Stale = pump off, panel repeating its last reading — logging it
+        // would draw fake flat lines through the temperature history.
+        if (b.temp !== null && b.tempStale !== true) insert.run(at, `temp:body:${b.id}`, b.temp);
         insert.run(at, `setpoint:body:${b.id}`, b.setPoint);
         if (elapsedSec > 0 && b.heatStatus !== "off") {
           bumpRuntime.run(day, `heater:body:${b.id}`, Math.round(elapsedSec), 0);

@@ -98,7 +98,7 @@ export function buildSystemPrompt(ctx: CopilotContext): string {
   const bodies = snap.bodies
     .map(
       (b) =>
-        `${b.name}(${b.kind}): ${b.temp !== null ? `${Math.round(b.temp)}${deg}` : "?"} now, target ${b.setPoint}${deg}, heat ${b.heatMode}${b.heatStatus !== "off" ? " (heating)" : ""}`
+        `${b.name}(${b.kind}): ${b.temp !== null ? `${Math.round(b.temp)}${deg}${b.tempStale ? " (stale, pump off)" : ""}` : "?"} now, target ${b.setPoint}${deg}, heat ${b.heatMode}${b.heatStatus !== "off" ? " (heating)" : ""}`
     )
     .join("; ");
   const circuits = allCircuits(snap)
