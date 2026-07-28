@@ -124,21 +124,33 @@ export function installKind(): "docker" | "source" {
 export interface UpdaterStatus {
   reachable: boolean;
   busy: boolean;
+  /** "idle" | "fetch" | "checkout" | "build" | "restart" | "done" | "failed" */
+  phase: string;
+  /** 0–100 estimate for the progress bar. */
+  progress: number;
   log: string[];
 }
 
+const OFFLINE: UpdaterStatus = { reachable: false, busy: false, phase: "idle", progress: 0, log: [] };
+
 export async function getUpdaterStatus(): Promise<UpdaterStatus> {
-  if (!UPDATER_URL) return { reachable: false, busy: false, log: [] };
+  if (!UPDATER_URL) return OFFLINE;
   try {
     const res = await fetch(`${UPDATER_URL}/status`, {
       headers: { Authorization: `Bearer ${UPDATER_TOKEN}` },
       signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) return { reachable: false, busy: false, log: [] };
-    const json = (await res.json()) as { busy?: boolean; log?: string[] };
-    return { reachable: true, busy: json.busy === true, log: json.log ?? [] };
+    if (!res.ok) return OFFLINE;
+    const json = (await res.json()) as { busy?: boolean; phase?: string; progress?: number; log?: string[] };
+    return {
+      reachable: true,
+      busy: json.busy === true,
+      phase: typeof json.phase === "string" ? json.phase : "idle",
+      progress: typeof json.progress === "number" ? Math.max(0, Math.min(100, json.progress)) : 0,
+      log: json.log ?? [],
+    };
   } catch {
-    return { reachable: false, busy: false, log: [] };
+    return OFFLINE;
   }
 }
 

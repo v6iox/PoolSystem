@@ -27,9 +27,18 @@ interface UpdatesInfo {
     lastError: string | null;
   };
   config: { auto: boolean; hour: number };
-  updater: { reachable: boolean; busy: boolean; log: string[] };
+  updater: { reachable: boolean; busy: boolean; phase: string; progress: number; log: string[] };
   installKind: "docker" | "source";
 }
+
+const PHASE_LABELS: Record<string, string> = {
+  fetch: "Fetching the release…",
+  checkout: "Checking out the new version…",
+  build: "Building the new image — the long part…",
+  restart: "Restarting Moonpool…",
+  done: "Update complete",
+  failed: "Update failed — see the log below",
+};
 
 const HOURS = Array.from({ length: 24 }, (_, h) => ({
   value: String(h),
@@ -200,8 +209,19 @@ export function UpdatesSection(): React.JSX.Element {
         )}
 
         {busy && (
-          <div className="mt-3 max-h-40 overflow-y-auto rounded-xl border border-accent/25 bg-abyss/50 p-3">
-            <p className="mb-1.5 text-xs font-medium text-accent">Rebuilding — Moonpool will restart itself…</p>
+          <div className="mt-3 max-h-48 overflow-y-auto rounded-xl border border-accent/25 bg-abyss/50 p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="text-xs font-medium text-accent">
+                {PHASE_LABELS[info?.updater.phase ?? ""] ?? "Rebuilding — Moonpool will restart itself…"}
+              </p>
+              <span className="text-xs tabular-nums text-ink-dim">{info?.updater.progress ?? 0}%</span>
+            </div>
+            <div className="mb-2.5 h-2 overflow-hidden rounded-full bg-abyss/70">
+              <div
+                className="h-full rounded-full bg-accent transition-all duration-700"
+                style={{ width: `${Math.max(2, info?.updater.progress ?? 0)}%` }}
+              />
+            </div>
             {(info?.updater.log ?? []).slice(-8).map((line, i) => (
               <p key={i} className="truncate font-mono text-[10.5px] leading-relaxed text-ink-faint">
                 {line}
