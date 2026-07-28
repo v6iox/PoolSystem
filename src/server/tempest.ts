@@ -238,7 +238,25 @@ export function startTempest(): void {
 /** Fresh station conditions, or null if we haven't heard from the Tempest lately. */
 export function getTempestCurrent(): TempestCurrent | null {
   const c = state().current;
-  if (!c || now() - c.at > FRESH_MS) return null;
+  if (!c || now() - c.at > FRESH_MS) {
+    // Simulator: synthesize a station so Tempest-driven UI (verified badge,
+    // wind advisories, rain measurements) is demoable with zero hardware.
+    if (process.env.MOCK_MODE === "true") {
+      return {
+        at: now() - 25_000,
+        tempF: 74.8,
+        humidity: 38,
+        windMph: 6.2,
+        gustMph: 11.5,
+        uv: 5,
+        solarWm2: 610,
+        pressureMb: 1013,
+        rainTodayMm: 0,
+        lightningCount3h: 0,
+      };
+    }
+    return null;
+  }
   return c;
 }
 
