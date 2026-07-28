@@ -137,7 +137,9 @@ export function CalibrationSection(): React.JSX.Element | null {
                 <Zap size={13} className="mt-0.5 shrink-0 text-accent" />
                 <span>
                   <span className="font-medium text-ink">Applies everywhere in Moonpool, instantly</span> — dials,
-                  history, automations, alerts and the copilot all use the corrected reading.
+                  history, automations, alerts and the copilot all use the corrected reading. Heating is compensated
+                  too: &ldquo;heat to 100°&rdquo; aims the panel so the <em>water</em> truly reaches 100°, not the
+                  sensor&apos;s misreading.
                 </span>
               </p>
               <p className="flex items-start gap-2 text-xs text-ink-dim">

@@ -206,9 +206,11 @@ export class MockAdapter implements PoolAdapter {
       isOn: this.circuitById(b.circuitId)?.isOn ?? false,
       temp: Math.round((b.temp + this.calib.water1) * 10) / 10,
       tempStale: !(this.circuitById(b.circuitId)?.isOn ?? false),
-      setPoint: b.setPoint,
-      minSetPoint: 60,
-      maxSetPoint: b.kind === "spa" ? 104 : 95,
+      // Calibrated space, like the njsPC adapter: the sim's thermostat (the
+      // "panel") runs on raw values, setSetPoint translates back.
+      setPoint: b.setPoint + this.calib.water1,
+      minSetPoint: 60 + this.calib.water1,
+      maxSetPoint: Math.min(b.kind === "spa" ? 104 : 95, (b.kind === "spa" ? 104 : 95) + this.calib.water1),
       heatMode: b.heatMode,
       supportedHeatModes: ["off", "heater", "solar", "solarpref"],
       heatStatus: b.heaterFiring ? (b.heatMode === "solar" ? "solar" : "heater") : "off",
@@ -347,9 +349,11 @@ export class MockAdapter implements PoolAdapter {
   async setSetPoint(bodyId: number, setPoint: number): Promise<void> {
     const b = this.bodyById(bodyId);
     if (!b) throw new AdapterError(`Unknown body ${bodyId}`, 404);
+    // Calibrated space in, panel space stored (mirrors NjspcAdapter).
+    const raw = setPoint - this.calib.water1;
     const max = b.kind === "spa" ? 104 : 95;
-    if (setPoint < 60 || setPoint > max) throw new AdapterError(`Setpoint ${setPoint} out of range 60–${max}`, 400);
-    b.setPoint = setPoint;
+    if (raw < 60 || raw > max) throw new AdapterError(`Setpoint ${setPoint} out of range`, 400);
+    b.setPoint = raw;
     this.emit();
   }
 

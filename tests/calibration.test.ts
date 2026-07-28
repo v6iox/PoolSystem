@@ -91,6 +91,42 @@ describe("moonpool-side temp calibration", () => {
   });
 });
 
+describe("setpoint compensation", () => {
+  it("translates setpoints and bounds into calibrated space on read", () => {
+    setSetting("njspcTempCalibration", { water1: -4, air: 0 });
+    const snap = normalize(new NjspcAdapter("http://test:4200"), easytouchState());
+    const spa = snap.bodies.find((b) => b.id === 2)!;
+    // Panel setpoint 100 with a sensor that reads 4° high = a true 96.
+    expect(spa.setPoint).toBe(96);
+    expect(spa.minSetPoint).toBe(56); // panel floor 60, honest reachable floor
+    expect(spa.maxSetPoint).toBe(100); // panel ceiling 104 → true 100 is the max reachable
+  });
+
+  it("writes the panel-space setpoint so the WATER reaches the asked temp", async () => {
+    setSetting("njspcTempCalibration", { water1: -4, air: 0 });
+    const adapter = new NjspcAdapter("http://test:4200");
+    normalize(adapter, easytouchState()); // populates the per-body offset map
+    const writes: Array<{ path: string; payload: unknown }> = [];
+    (adapter as unknown as { put: (path: string, payload: unknown) => Promise<unknown> }).put = async (
+      path,
+      payload
+    ) => {
+      writes.push({ path, payload });
+      return {};
+    };
+    // User asks for a true 100 — the panel's high-reading sensor must be told 104.
+    await adapter.setSetPoint(2, 100);
+    expect(writes).toEqual([{ path: "/state/body/setPoint", payload: { id: 2, setPoint: 104 } }]);
+  });
+
+  it("a positive offset never unlocks true temps above the panel's own ceiling", () => {
+    setSetting("njspcTempCalibration", { water1: 4, air: 0 });
+    const snap = normalize(new NjspcAdapter("http://test:4200"), easytouchState());
+    const spa = snap.bodies.find((b) => b.id === 2)!;
+    expect(spa.maxSetPoint).toBe(104); // NOT 108 — scald limit stays the panel's
+  });
+});
+
 describe("stale temp flag", () => {
   it("marks a body whose circulation is off as stale, live otherwise", () => {
     setSetting("njspcTempCalibration", { water1: 0, air: 0 });
