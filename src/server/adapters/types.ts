@@ -94,6 +94,8 @@ export interface PanelClock {
   source: string;
   mode: "12h" | "24h" | "unknown";
   serverTime: string;
+  /** What the PANEL currently thinks the time is (null when it doesn't say). */
+  panelTime: string | null;
 }
 
 export interface AdvancedOptions {

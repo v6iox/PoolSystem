@@ -448,7 +448,7 @@ export class MockAdapter implements PoolAdapter {
       lightCircuitIds: this.circuits.filter((c) => c.isLight).map((c) => c.id),
       heaters: [{ id: 1, name: "Gas Heater", typeName: "gas", bodyDesc: "Pool & Spa", coolingEnabled: null }],
       valves: this.valves.map((v) => ({ ...v, circuitName: v.circuitId !== null ? name(v.circuitId) : "" })),
-      clock: { source: "server", mode: "12h", serverTime: new Date().toISOString() },
+      clock: { source: "server", mode: "12h", serverTime: new Date().toISOString(), panelTime: new Date().toISOString() },
     };
   }
 

@@ -423,6 +423,14 @@ cd ~/moonpool && git pull && docker compose up -d --build
 The database schema migrates itself on boot. History samples are pruned at 90
 days; daily rollups are kept forever and stay tiny.
 
+**Don't hand-edit files in the install directory.** Updates check out the
+release tag over the working tree — if the updater finds local edits it
+refuses and lists them in the UI, where you can either keep them (and skip
+the update) or explicitly discard them. Changes belong in the repo:
+`scripts/pi-deploy.sh` pushes unreleased work to the Pi for testing, and a
+release ships anything permanent. The one exception is `.env` — it's
+gitignored and always survives updates.
+
 ## 16. Living with ScreenLogic during the transition
 
 First, a fact that makes this much less scary than it sounds:

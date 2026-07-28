@@ -319,13 +319,14 @@ export class NjspcAdapter implements PoolAdapter {
     // Each area comes from its own njsPC options endpoint; any one failing
     // (older builds, odd equipment) just leaves that area empty.
     const opt = async (path: string): Promise<Json> => asObj(await this.get(path).catch(() => ({})));
-    const [circuitsOpt, pumpsOpt, lightsOpt, heatersOpt, valvesOpt, generalOpt] = await Promise.all([
+    const [circuitsOpt, pumpsOpt, lightsOpt, heatersOpt, valvesOpt, generalOpt, stateAll] = await Promise.all([
       opt("/config/options/circuits"),
       opt("/config/options/pumps"),
       opt("/config/options/lightGroups"),
       opt("/config/options/heaters"),
       opt("/config/options/valves"),
       opt("/config/options/general"),
+      opt("/state/all"),
     ]);
 
     const circuitName = (id: number): string =>
@@ -398,6 +399,16 @@ export class NjspcAdapter implements PoolAdapter {
     });
 
     const clockMode = num(asObj(generalOpt.clockMode).val ?? generalOpt.clockMode, 0);
+    // njsPC reports the panel's own clock in /state/all as `time` — an ISO-ish
+    // local string on current builds. Pass it through raw; the UI computes
+    // drift against serverTime.
+    const rawPanelTime = stateAll.time;
+    const panelTime =
+      typeof rawPanelTime === "string" && rawPanelTime.length > 0
+        ? rawPanelTime
+        : typeof asObj(rawPanelTime).ISO === "string"
+          ? String(asObj(rawPanelTime).ISO)
+          : null;
     return {
       circuits,
       circuitFunctions,
@@ -410,6 +421,7 @@ export class NjspcAdapter implements PoolAdapter {
         source: str(generalOpt.clockSource, "manual") || "manual",
         mode: clockMode === 24 ? "24h" : clockMode === 12 ? "12h" : "unknown",
         serverTime: new Date().toISOString(),
+        panelTime,
       },
     };
   }
