@@ -1,4 +1,5 @@
 import { io, type Socket } from "socket.io-client";
+import { getSetting, setSetting } from "@/server/settings";
 import { EMPTY_SNAPSHOT } from "@/types/pool";
 import type {
   BodyState,
@@ -152,6 +153,29 @@ const DAY_BITS = [1, 2, 4, 8, 16, 32, 64]; // Sun..Sat
 
 const LIGHT_TYPES = new Set(["intellibrite", "colorlogic", "light", "magicstream", "globrite", "colorcascade", "dimmer"]);
 
+/**
+ * Sensor offsets Moonpool applies ITSELF. On *Touch/IntelliCenter panels
+ * njsPC only STORES calibration written to /config/tempSensors — the values
+ * from the panel's status packets are never adjusted by it (that happens
+ * solely in standalone/Nixie mode's setTempsAsync), and no RS-485 message
+ * exists to push calibration into the panel. So for OCP panels the offsets
+ * live in Moonpool's own DB and are added to readings in normalize().
+ */
+interface StoredCalib {
+  water1: number;
+  water2: number;
+  air: number;
+  solar1: number;
+  solar2: number;
+}
+const ZERO_CALIB: StoredCalib = { water1: 0, water2: 0, air: 0, solar1: 0, solar2: 0 };
+const CALIB_KEY = "njspcTempCalibration";
+
+/** Panels whose temps come from status packets njsPC never calibrates. */
+function isTouchFamily(controllerType: string): boolean {
+  return /touch|intellicenter/i.test(controllerType);
+}
+
 export class NjspcAdapter implements PoolAdapter {
   readonly kind = "njspc" as const;
 
@@ -163,9 +187,11 @@ export class NjspcAdapter implements PoolAdapter {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private lightThemes: LightThemeDef[] = [];
   private connected = false;
+  private calib: StoredCalib;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
+    this.calib = { ...ZERO_CALIB, ...getSetting<Partial<StoredCalib>>(CALIB_KEY, {}) };
   }
 
   async start(): Promise<void> {
@@ -322,8 +348,34 @@ export class NjspcAdapter implements PoolAdapter {
   }
 
   async getTempCalibration(): Promise<TempCalibration> {
-    // dashPanel reads these from /config/options/general; older builds keep
-    // them under equipment.tempSensors in /config/all. Try both.
+    if (isTouchFamily(this.snapshot.equipment.controllerType)) {
+      // Moonpool-owned offsets (see StoredCalib). Which sensor rows to show
+      // comes from the panel's own sensor list.
+      const active = new Set<string>();
+      try {
+        const config = asObj(await this.get("/config/all"));
+        for (const s of asArr(asObj(config.equipment).tempSensors)) {
+          if (bool(s.isActive)) active.add(str(s.id));
+        }
+      } catch {
+        /* fall back below */
+      }
+      if (active.size === 0) {
+        active.add("air").add("water1");
+        if (this.snapshot.solarTemp !== null) active.add("solar1");
+      }
+      return {
+        water1: this.calib.water1,
+        water2: active.has("water2") ? this.calib.water2 : null,
+        air: active.has("air") ? this.calib.air : null,
+        solar1: active.has("solar1") ? this.calib.solar1 : null,
+        solar2: active.has("solar2") ? this.calib.solar2 : null,
+        min: -10,
+        max: 10,
+      };
+    }
+    // Standalone/Nixie: njsPC genuinely applies its stored calibration, so
+    // read it back. dashPanel reads these from /config/options/general.
     let temps: Record<string, unknown> = {};
     try {
       const opts = asObj(await this.get("/config/options/general"));
@@ -351,6 +403,29 @@ export class NjspcAdapter implements PoolAdapter {
   }
 
   async setTempCalibration(input: TempCalibrationInput): Promise<void> {
+    if (isTouchFamily(this.snapshot.equipment.controllerType)) {
+      const next = { ...this.calib };
+      if (input.water1 !== undefined) next.water1 = input.water1;
+      if (input.water2 !== undefined) next.water2 = input.water2;
+      if (input.air !== undefined) next.air = input.air;
+      if (input.solar1 !== undefined) next.solar1 = input.solar1;
+      if (input.solar2 !== undefined) next.solar2 = input.solar2;
+      this.calib = next;
+      setSetting(CALIB_KEY, next);
+      // Older Moonpool builds wrote offsets into njsPC's config where they
+      // sat inert on touch panels — zero them so they can't surprise anyone
+      // if a future njsPC starts honoring them.
+      await this.put("/config/tempSensors", {
+        waterTempAdj1: 0,
+        waterTempAdj2: 0,
+        airTempAdj: 0,
+        solarTempAdj1: 0,
+        solarTempAdj2: 0,
+      }).catch(() => undefined);
+      this.scheduleRefresh();
+      return;
+    }
+    // Standalone/Nixie: njsPC applies these itself — write through.
     const payload: Json = {};
     if (input.water1 !== undefined) payload.waterTempAdj1 = input.water1;
     if (input.water2 !== undefined) payload.waterTempAdj2 = input.water2;
@@ -768,6 +843,15 @@ export class NjspcAdapter implements PoolAdapter {
   private normalize(state: Json): PoolStateSnapshot {
     const temps = asObj(state.temps);
     const units: "F" | "C" = str(temps.units).toUpperCase().includes("C") ? "C" : "F";
+    const equipmentObj = asObj(state.equipment);
+    // Moonpool-side sensor offsets (see StoredCalib): applied here for
+    // touch-family panels; standalone/Nixie readings arrive from njsPC
+    // already calibrated, so those get zeros.
+    const cal = isTouchFamily(str(equipmentObj.controllerType, str(state.controllerType))) ? this.calib : ZERO_CALIB;
+    // Only dual-equipment systems have a second water sensor; on shared
+    // systems both bodies read the same (water1-offset) sensor.
+    const dualEquipment = bool(equipmentObj.dual);
+    const offset = (v: number | null, o: number): number | null => (v === null ? null : v + o);
 
     const bodies: BodyState[] = asArr(temps.bodies).map((b): BodyState => {
       const heatModeName = str(b.heatMode);
@@ -784,7 +868,10 @@ export class NjspcAdapter implements PoolAdapter {
         name: str(b.name, kind === "spa" ? "Spa" : "Pool"),
         kind,
         isOn: bool(b.isOn),
-        temp: numOrNull(b.temp),
+        temp: offset(numOrNull(b.temp), bodyId >= 2 && dualEquipment ? cal.water2 : cal.water1),
+        // With the circulation off the sensor isn't in the water flow — the
+        // panel just repeats the last reading it saw, which reads as current.
+        tempStale: !bool(b.isOn),
         setPoint: num(b.setPoint, 78),
         minSetPoint: num(b.minSetPoint ?? asObj(b).setPointMin, 60),
         maxSetPoint: num(b.maxSetPoint ?? asObj(b).setPointMax, kind === "spa" ? 104 : 95),
@@ -938,14 +1025,13 @@ export class NjspcAdapter implements PoolAdapter {
           ? "auto"
           : "unknown";
 
-    const equipmentObj = asObj(state.equipment);
     return {
       connected: this.connected,
       mock: false,
       lastUpdate: Date.now(),
       units,
-      airTemp: numOrNull(temps.air),
-      solarTemp: numOrNull(temps.solar),
+      airTemp: offset(numOrNull(temps.air), cal.air),
+      solarTemp: offset(numOrNull(temps.solar), cal.solar1),
       freezeProtect: bool(state.freeze),
       ...parseDelayState(state),
       panelMode,

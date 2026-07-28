@@ -256,7 +256,12 @@ function tempsReply(ctx: CopilotContext): string {
   const deg = `°${snap.units}`;
   if (snap.bodies.length === 0) return "No bodies of water are reported right now.";
   const lines = snap.bodies.map((b) => {
-    const temp = b.temp !== null ? `${Math.round(b.temp * 10) / 10}${deg}` : "no reading";
+    const temp =
+      b.temp === null
+        ? "no reading"
+        : b.tempStale
+          ? `no live reading (pump off — last saw ${Math.round(b.temp * 10) / 10}${deg})`
+          : `${Math.round(b.temp * 10) / 10}${deg}`;
     const heat =
       b.heatStatus !== "off"
         ? `heating (${b.heatStatus}) toward ${b.setPoint}${deg}`
@@ -325,7 +330,7 @@ function overallReply(ctx: CopilotContext): string {
   const lines: string[] = ["Here's the pool right now:"];
   for (const b of snap.bodies) {
     lines.push(
-      `• ${b.name}: ${b.temp !== null ? `${Math.round(b.temp * 10) / 10}${deg}` : "—"}${b.heatStatus !== "off" ? ` (heating to ${b.setPoint}${deg})` : ""}`
+      `• ${b.name}: ${b.temp === null ? "—" : b.tempStale ? `— (pump off, last ${Math.round(b.temp)}${deg})` : `${Math.round(b.temp * 10) / 10}${deg}`}${b.heatStatus !== "off" ? ` (heating to ${b.setPoint}${deg})` : ""}`
     );
   }
   const on = [...snap.circuits, ...snap.features].filter((c) => c.isOn);

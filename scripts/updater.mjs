@@ -39,6 +39,23 @@ function setPhase(name, pct) {
   progress = pct;
 }
 
+// The docker build's longest steps (npm ci, next build) each sit on ONE
+// buildkit marker for minutes — trickle the bar slowly between markers so it
+// visibly moves the whole time. Markers always win via Math.max.
+let trickleTimer = null;
+function startTrickle() {
+  stopTrickle();
+  trickleTimer = setInterval(() => {
+    if (phase === "build" && progress < 88) progress += 1;
+  }, 12_000);
+}
+function stopTrickle() {
+  if (trickleTimer) {
+    clearInterval(trickleTimer);
+    trickleTimer = null;
+  }
+}
+
 function addLog(line) {
   const stamped = `${new Date().toISOString()} ${line}`;
   log.push(stamped);
@@ -58,34 +75,103 @@ function addLog(line) {
 function run(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
     addLog(`$ ${cmd} ${args.join(" ")}`);
-    const child = execFile(cmd, args, { cwd: WORKSPACE, timeout: 30 * 60_000, ...opts }, (err, stdout, stderr) => {
-      for (const chunk of [stdout, stderr]) {
-        for (const line of String(chunk).split("\n")) {
+    const child = execFile(
+      cmd,
+      args,
+      {
+        cwd: WORKSPACE,
+        timeout: 30 * 60_000,
+        // A full image-build log can blow past execFile's 1 MB default.
+        maxBuffer: 64 * 1024 * 1024,
+        ...opts,
+        // Force buildkit's line-per-step output even if docker thinks otherwise.
+        env: { ...process.env, BUILDKIT_PROGRESS: "plain", ...(opts.env ?? {}) },
+      },
+      (err, stdout) => {
+        if (err) reject(new Error(`${cmd} failed: ${err.message}`));
+        else resolve(String(stdout));
+      }
+    );
+    // Stream output line-by-line AS IT HAPPENS — the exit callback above only
+    // sees the buffers after the process ends, which for a multi-minute
+    // docker build means the progress bar would sit still and then jump.
+    for (const stream of [child.stdout, child.stderr]) {
+      if (!stream) continue;
+      let buf = "";
+      stream.setEncoding("utf8");
+      stream.on("data", (chunk) => {
+        buf += chunk;
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
           const trimmed = line.trim();
           if (trimmed) addLog(`  ${trimmed.slice(0, 300)}`);
         }
-      }
-      if (err) reject(new Error(`${cmd} failed: ${err.message}`));
-      else resolve(String(stdout));
-    });
+      });
+      stream.on("end", () => {
+        const trimmed = buf.trim();
+        if (trimmed) addLog(`  ${trimmed.slice(0, 300)}`);
+      });
+    }
     child.on("error", reject);
   });
 }
 
-/** Compose project name + files, discovered from this container's own labels. */
-async function composeArgs() {
+/**
+ * Compose project/files plus this container's own image and the HOST path of
+ * the workspace bind — discovered from Docker so the self-refresh helper can
+ * mount the same checkout.
+ */
+async function selfInfo() {
   const inspect = await run("docker", ["inspect", hostname()], { cwd: "/" });
-  const info = JSON.parse(inspect)[0];
+  const info = JSON.parse(inspect)[0] ?? {};
   const labels = info?.Config?.Labels ?? {};
   const project = labels["com.docker.compose.project"] || "moonpool";
-  const args = ["compose", "-p", project, "-f", `${WORKSPACE}/docker-compose.yml`];
+  const image = info?.Config?.Image ?? "";
+  const workspaceHost = (info?.Mounts ?? []).find((m) => m.Destination === WORKSPACE)?.Source ?? "";
+  const files = [`${WORKSPACE}/docker-compose.yml`];
   try {
     await run("test", ["-f", `${WORKSPACE}/docker-compose.override.yml`], { cwd: "/" });
-    args.push("-f", `${WORKSPACE}/docker-compose.override.yml`);
+    files.push(`${WORKSPACE}/docker-compose.override.yml`);
   } catch {
     /* no override */
   }
-  return args;
+  const args = ["compose", "-p", project, ...files.flatMap((f) => ["-f", f])];
+  return { args, project, files, image, workspaceHost };
+}
+
+/**
+ * The sidecar runs a copy of this script BAKED INTO ITS IMAGE — one-tap
+ * updates rebuild only `web`, so without this step updater fixes would never
+ * reach existing installs. After a successful update, rebuild the updater
+ * image and, if it changed, recreate the sidecar from a detached helper
+ * container. (A process can't recreate its own container: it dies at the
+ * "stop" half of the recreate and the "start" never gets issued.)
+ */
+async function refreshSelf(self) {
+  try {
+    if (!self.image || !self.workspaceHost) return;
+    const imageId = async () =>
+      (await run("docker", ["image", "inspect", "--format", "{{.Id}}", self.image], { cwd: "/" })).trim();
+    const before = await imageId();
+    await run("docker", [...self.args, "build", "updater"]);
+    if ((await imageId()) === before) return;
+    addLog("updater image changed — recreating the sidecar (brief restart of this service)");
+    const composeCmd = `docker compose -p ${self.project} ${self.files.map((f) => `-f ${f}`).join(" ")} up -d --no-deps updater`;
+    await run(
+      "docker",
+      [
+        "run", "-d", "--rm",
+        "-v", "/var/run/docker.sock:/var/run/docker.sock",
+        "-v", `${self.workspaceHost}:${WORKSPACE}`,
+        self.image,
+        "sh", "-c", `sleep 2 && ${composeCmd}`,
+      ],
+      { cwd: "/" }
+    );
+  } catch (err) {
+    addLog(`sidecar self-refresh skipped: ${err.message}`);
+  }
 }
 
 /** Tracked files with local modifications — what `checkout -f` would destroy. */
@@ -110,19 +196,23 @@ async function applyUpdate(ref, force) {
     await run("git", ["fetch", "--force", "--tags", "origin"]);
     setPhase("checkout", 10);
     await run("git", ["checkout", "-f", ref]);
-    const compose = await composeArgs();
+    const self = await selfInfo();
     setPhase("build", 15);
+    startTrickle();
     addLog("building web image (this takes a few minutes on a Pi)…");
-    await run("docker", [...compose, "build", "web"]);
+    await run("docker", [...self.args, "build", "web"]);
+    stopTrickle();
     setPhase("restart", 92);
     addLog("restarting web…");
-    await run("docker", [...compose, "up", "-d", "--no-deps", "web"]);
+    await run("docker", [...self.args, "up", "-d", "--no-deps", "web"]);
     setPhase("done", 100);
     addLog(`✓ update to ${ref} complete`);
+    await refreshSelf(self);
   } catch (err) {
     setPhase("failed", progress);
     addLog(`✗ update failed: ${err.message}`);
   } finally {
+    stopTrickle();
     busy = false;
   }
 }

@@ -63,6 +63,7 @@ function Hero(): React.JSX.Element {
       <div className={cn("grid grid-cols-1 gap-4", snapshot.bodies.length > 1 && "sm:grid-cols-2")}>
         {snapshot.bodies.map((body, i) => {
           const heating = body.heatStatus !== "off";
+          const stale = body.tempStale === true;
           return (
             <motion.div
               key={body.id}
@@ -90,7 +91,7 @@ function Hero(): React.JSX.Element {
                 </div>
                 <TempDial
                   label={body.name}
-                  temp={body.temp}
+                  temp={stale ? null : body.temp}
                   setPoint={body.setPoint}
                   min={body.minSetPoint}
                   max={body.maxSetPoint}
@@ -130,10 +131,18 @@ function Hero(): React.JSX.Element {
                 <p className="mt-2 text-xs capitalize text-ink-faint">
                   heat: {body.heatMode === "solarpref" ? "solar preferred" : body.heatMode}
                 </p>
-                {body.temp !== null && typeof body.tempChangedAt === "number" && (
+                {stale ? (
                   <p className="mt-0.5 text-[11px] text-ink-faint/70">
-                    reading updated {formatRelative(body.tempChangedAt)}
+                    no live reading — pump off
+                    {body.temp !== null ? ` (last ${Math.round(body.temp)}°${snapshot.units})` : ""}
                   </p>
+                ) : (
+                  body.temp !== null &&
+                  typeof body.tempChangedAt === "number" && (
+                    <p className="mt-0.5 text-[11px] text-ink-faint/70">
+                      reading updated {formatRelative(body.tempChangedAt)}
+                    </p>
+                  )
                 )}
               </Panel>
             </motion.div>

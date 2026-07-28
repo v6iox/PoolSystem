@@ -22,6 +22,12 @@ export interface BodyState {
   isOn: boolean;
   /** Current water temp; null when sensor unavailable / body off with no reading. */
   temp: number | null;
+  /**
+   * True when the circulation for this body is off, so `temp` is the panel's
+   * remembered last reading, not live water. UIs show "—" instead of the
+   * number; history logging skips stale samples.
+   */
+  tempStale?: boolean;
   setPoint: number;
   /** Bounds reported by the panel; used to clamp every setpoint write. */
   minSetPoint: number;

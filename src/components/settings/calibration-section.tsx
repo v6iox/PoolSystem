@@ -10,8 +10,13 @@ import { SettingRow, SettingsSection } from "@/components/settings/section";
 import { Skeleton } from "@/components/ui/panel";
 
 /**
- * Panel temperature-sensor calibration — the same water/air/solar offsets
- * ScreenLogic exposes, written to the panel through njsPC. Owner-only.
+ * Temperature-sensor offsets. On EasyTouch/IntelliTouch/IntelliCenter these
+ * are applied BY MOONPOOL to everything it shows and automates — njsPC only
+ * stores calibration for touch panels without ever applying it, and no
+ * RS-485 message exists to push calibration into the panel (Pentair only
+ * allows that at the panel's own menu). Standalone/Nixie controllers apply
+ * njsPC-side calibration properly, so there the offsets write through.
+ * Owner-only.
  */
 
 interface Calibration {
@@ -112,7 +117,7 @@ export function CalibrationSection(): React.JSX.Element | null {
     <SettingsSection
       icon={<Thermometer size={14} />}
       title="Sensor calibration"
-      description={`Nudge readings to match a trusted thermometer — written to the panel itself, so every display (including ScreenLogic) agrees. Range ${cal ? `${cal.min}${unit} to +${cal.max}${unit}` : "±10°"}.`}
+      description={`Nudge readings to match a trusted thermometer — applied instantly to everything Moonpool shows, logs and automates. The panel's own screen keeps its factory reading (Pentair only allows calibrating that at the panel itself). Range ${cal ? `${cal.min}${unit} to +${cal.max}${unit}` : "±10°"}.`}
     >
       {query.isPending ? (
         <div className="p-4">

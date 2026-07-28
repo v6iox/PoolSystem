@@ -205,6 +205,7 @@ export class MockAdapter implements PoolAdapter {
       kind: b.kind,
       isOn: this.circuitById(b.circuitId)?.isOn ?? false,
       temp: Math.round((b.temp + this.calib.water1) * 10) / 10,
+      tempStale: !(this.circuitById(b.circuitId)?.isOn ?? false),
       setPoint: b.setPoint,
       minSetPoint: 60,
       maxSetPoint: b.kind === "spa" ? 104 : 95,
