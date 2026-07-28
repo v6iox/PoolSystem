@@ -38,7 +38,7 @@ first time; most of it is waiting for downloads.
 | Item | Notes | Rough cost |
 | --- | --- | --- |
 | Pentair EasyTouch or IntelliTouch panel | The outdoor control panel you already have | — |
-| Raspberry Pi 4 or 5 (4 GB+ RAM, 8 GB recommended for the local copilot) | Pi 5 8 GB is the sweet spot | ~$80 |
+| Raspberry Pi 4 or 5 (4 GB+ RAM, 8 GB recommended for the local copilot) | Pi 5 8 GB is the sweet spot. 2 GB works with the small model — see [Running on 2 GB](#running-on-2-gb) | ~$80 |
 | microSD card, 32 GB+ (A2 class) or NVMe hat | Endurance cards last longer with history logging | ~$15 |
 | USB RS-485 adapter | FTDI or CH340-based, screw terminals are easiest | ~$10–15 |
 | A pair of wires to the panel's RS-485 bus | Or tap the indoor transceiver of Pentair's wireless link kit if you have one | — |
@@ -268,6 +268,15 @@ Pick the brain in **Settings → Voice & AI** (Owner):
 1. **Local (Ollama)** — default, private, free. Needs the one-time
    `ollama pull qwen3:1.7b` from step 5. Fine for common commands; a small
    model on a Pi is deliberately modest.
+
+   Whatever the model returns is **grounded against your own words** before
+   anything is proposed (`src/server/copilot/grounding.ts`). A small model
+   reads "hot tub" as the pool, does clock arithmetic instead of passing
+   "9 pm" through, and sometimes fires an action immediately *and* schedules
+   it. Those are all things a regex can settle from the sentence you typed, so
+   Moonpool settles them rather than trusting the model — which is what makes
+   a 0.6B model safe enough to ship. Corrections are logged as
+   `copilot grounding: …` so you can see when it stepped in.
 2. **OpenAI API key** — paste a key from platform.openai.com. Uses
    `gpt-4o-mini` by default (pennies per question, much better at nuance).
    The key is stored only in the Pi's database.
@@ -278,6 +287,33 @@ Pick the brain in **Settings → Voice & AI** (Owner):
    subscription now powers the copilot (`gpt-5` by default). This mirrors the
    Codex CLI / OpenClaw flow; it's unofficial, so if OpenAI ever changes it,
    switch to an API key.
+
+### Running on 2 GB
+
+A 2 GB Pi has to fit Moonpool (~250 MB), njsPC and the model at once. Measured
+resident size with a 4096-token context window:
+
+| Model | Resident | Notes |
+| --- | --- | --- |
+| `qwen3:0.6b` | 0.80 GB | Fits 2 GB alongside everything else |
+| `qwen3:1.7b` | 1.66 GB | Needs 4 GB in practice |
+
+Two settings matter more than the model choice:
+
+- **`OLLAMA_CONTEXT_LENGTH`** — with no limit, Ollama sizes the KV cache from
+  available memory and the same 1.7b model takes **3.5 GB** instead of 1.66 GB.
+  `docker-compose.yml` pins it to 4096.
+- **`COPILOT_CONTEXT_TOKENS`** — must match it. When a request overflows the
+  window, llama.cpp drops tokens from the *front*, which silently deletes the
+  system prompt and leaves the copilot improvising. Moonpool trims old chat
+  turns to stay under this budget instead of relying on the window being big
+  enough.
+
+`OLLAMA_KV_CACHE_TYPE=q8_0` halves the KV cache again and is on by default.
+
+> **Timezone:** every schedule resolves in the server's local time, so `TZ` in
+> `.env` must match the Pi's own timezone. If they disagree, "9 pm" fires an
+> hour off — set both to the same zone.
 
 ## 12. Voice: Siri & Alexa
 

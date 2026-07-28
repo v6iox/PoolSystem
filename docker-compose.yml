@@ -8,10 +8,24 @@
 services:
   # nodejs-poolController — talks RS-485 to the Pentair panel via USB adapter.
   njspc:
-    image: tagyoureit/nodejs-poolcontroller:latest
+    # Built from upstream source rather than pulled: the project publishes no
+    # official image (tagyoureit/nodejs-poolcontroller does not exist on Docker
+    # Hub, and there is no GHCR package), and the third-party rebuilds that do
+    # exist are not worth trusting with RS-485 access to the panel. Pinned to a
+    # tag so a rebuild can't silently pick up new upstream code.
+    build:
+      context: https://github.com/tagyoureit/nodejs-poolController.git#v10.0.0
+    image: moonpool/njspc:v10.0.0
     restart: unless-stopped
     devices:
-      - "/dev/ttyUSB0:/dev/ttyUSB0"
+      - "${SERIAL_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0"
+    # The upstream image runs as the unprivileged `node` user, and USB serial
+    # adapters are root:plugdev 0660 on Raspberry Pi OS — so without this the
+    # container starts fine and then loops on "Permission denied, cannot open
+    # /dev/ttyUSB0". 46 is plugdev on Debian; override if your host differs
+    # (getent group plugdev).
+    group_add:
+      - "${SERIAL_GROUP_ID:-46}"
     volumes:
       - njspc-data:/app/data
       - njspc-config:/app/config
@@ -44,6 +58,13 @@ services:
       - COPILOT_BASE_URL=${COPILOT_BASE_URL:-http://ollama:11434/v1}
       - COPILOT_MODEL=${COPILOT_MODEL:-qwen3:1.7b}
       - COPILOT_API_KEY=${COPILOT_API_KEY:-}
+      - COPILOT_CONTEXT_TOKENS=${COPILOT_CONTEXT_TOKENS:-4096}
+      # Which brain the copilot uses. COPILOT_FORCE_MOCK=true selects the
+      # deterministic parser — no model, no memory, instant — which is the only
+      # workable option on hardware that can't host an LLM. Without these two
+      # passed through, setting them in .env has no effect inside the container.
+      - COPILOT_FORCE_MOCK=${COPILOT_FORCE_MOCK:-false}
+      - COPILOT_FORCE_LLM=${COPILOT_FORCE_LLM:-false}
       - POOL_LATITUDE=${POOL_LATITUDE:-39.74}
       - POOL_LONGITUDE=${POOL_LONGITUDE:--104.99}
       - TEMPEST_UDP=${TEMPEST_UDP:-true}
@@ -61,7 +82,13 @@ services:
       - ollama-models:/root/.ollama
     environment:
       - OLLAMA_KEEP_ALIVE=24h
-      - OLLAMA_CONTEXT_LENGTH=2048
+      # The system prompt alone is ~1680 tokens; a full chat history pushes a
+      # request to ~2170, which silently truncated the front of the prompt at
+      # the old 2048. 4096 fits with headroom (measured: qwen3:0.6b 0.80 GB
+      # resident, qwen3:1.7b 1.66 GB). Keep COPILOT_CONTEXT_TOKENS in step.
+      - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-4096}
+      # Halves KV-cache memory — the difference between fitting a 2 GB Pi and not.
+      - OLLAMA_KV_CACHE_TYPE=${OLLAMA_KV_CACHE_TYPE:-q8_0}
     expose:
       - "11434"
 
@@ -90,7 +117,11 @@ services:
     profiles: ["remote"]
     command: tunnel --no-autoupdate run
     environment:
-      - TUNNEL_TOKEN=${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env for the remote profile}
+      # Not `:?` — Compose interpolates every service's variables even when the
+      # service's profile is inactive, so a required-here token made plain
+      # `docker compose up` fail for everyone who never wanted a tunnel. The
+      # profile is the gate; cloudflared exits on its own if the token is blank.
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
     depends_on:
       - web
 
