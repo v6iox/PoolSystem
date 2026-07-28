@@ -161,8 +161,8 @@ export const CASES: EvalCase[] = [
   { text: "kill the jets", expect: [{ tool: "set_circuit", args: { circuitId: 7, state: false } }], tag: "circuits" },
   { text: "turn on the pool lights", expect: [{ tool: "set_circuit", args: { circuitId: 3, state: true } }], tag: "circuits" },
   { text: "start the cleaner", expect: [{ tool: "set_circuit", args: { circuitId: 5, state: true } }], tag: "circuits" },
-  { text: "turn on the hot tub", expect: [{ tool: "set_circuit", args: { circuitId: 1, state: true } }], tag: "circuits", mockSkip: true },
-  { text: "turn on the jacuzzi", expect: [{ tool: "set_circuit", args: { circuitId: 1, state: true } }], tag: "circuits", mockSkip: true },
+  { text: "turn on the hot tub", expect: [{ tool: "set_circuit", args: { circuitId: 1, state: true } }], tag: "circuits" },
+  { text: "turn on the jacuzzi", expect: [{ tool: "set_circuit", args: { circuitId: 1, state: true } }], tag: "circuits" },
   {
     text: "turn off the waterfall and jets",
     expect: [
@@ -177,7 +177,7 @@ export const CASES: EvalCase[] = [
   // ── heat ───────────────────────────────────────────────────────────────
   { text: "warm the spa a bit", expect: [{ tool: "set_heat", args: { body: "spa", setpoint: 102 } }], tag: "heat" },
   { text: "set spa to 102", expect: [{ tool: "set_heat", args: { body: "spa", setpoint: 102 } }], tag: "heat" },
-  { text: "set the hot tub to 104", expect: [{ tool: "set_heat", args: { body: "spa", setpoint: 104 } }], tag: "heat", mockSkip: true },
+  { text: "set the hot tub to 104", expect: [{ tool: "set_heat", args: { body: "spa", setpoint: 104 } }], tag: "heat" },
   {
     text: "heat the pool to 85",
     // Pool heat is OFF in the fixture, so a target alone would never heat.
@@ -195,14 +195,12 @@ export const CASES: EvalCase[] = [
     text: "turn on the hot tub at 9 pm",
     expect: [{ tool: "schedule_once", at: { hour: 21, minute: 0 }, actions: [{ tool: "set_circuit", args: { circuitId: 1, state: true } }] }],
     tag: "schedule-absolute",
-    mockSkip: true,
     note: "the reported bug",
   },
   {
     text: "heat the hot tub at 9pm",
     expect: [{ tool: "schedule_once", at: { hour: 21, minute: 0 }, actions: [{ tool: "set_heat", args: { body: "spa" } }] }],
     tag: "schedule-absolute",
-    mockSkip: true,
   },
   {
     text: "turn everything off at 11pm",
