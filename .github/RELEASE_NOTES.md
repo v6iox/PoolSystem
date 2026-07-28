@@ -1,68 +1,53 @@
-## Moonpool v1.0.4 🌙
+## Moonpool v1.0.5 🌙
 
-The copilot grows up, the panel opens up. Biggest release since launch — if
-you're on v1.0.3 with auto-update enabled, this one installs itself.
+Correctness release, proven on real hardware — a Raspberry Pi 4 driving a
+Pentair EasyTouch over RS-485. If you're on v1.0.4 with auto-update enabled,
+this one installs itself.
 
-### Copilot — talk to it like a person
+### The copilot stops guessing
 
-- **Do anything by asking** — pump RPM, pool/spa chlorinator output,
-  a color for one specific light, create/edit/delete panel schedules, save
-  and delete scenes, log water top-offs, ask "do we need water?" — the full
-  app surface, all confirm-first.
-- **It knows what time it is** — "in 2 hours, heat the hot tub" and
-  "tomorrow at 3pm" now schedule correctly (new relative one-off scheduling,
-  1 minute to 7 days out).
-- **Conversation memory** — follow-ups like "actually make it 3 hours" or
-  "same for the pool" resolve against what you just said.
-- **A voice, not a form letter** — friendly conversational replies (never
-  over the top), while every fact still comes from live data.
-- **Local models actually work now** — fixed a constrained-decoding
-  bottleneck that made multi-step requests time out on Ollama, raised the
-  local timeout to 60s (`COPILOT_TIMEOUT_MS` to tune), and skipped Qwen3's
-  slow thinking phase. Fresh installs offer to set up Ollama automatically.
-- **Never acts unprompted** — a deterministic guard drops any tool call a
-  small model hallucinates onto a greeting.
+- **Grounded against your own words** — which body, which circuit, and when
+  are now settled deterministically from the sentence you typed, overriding
+  whatever the model returns. "Turn on the hot tub at 9 pm" can no longer
+  become "pool heater, right now" — with any brain, including the tiny ones.
+- **Scheduled times are pinned when you ask** — a 9 PM plan confirmed at 9:01
+  no longer slides a day; date handling and past-time refusals tightened.
+- **No more double-fire** — an action meant for later can't also run now.
+- **"Stop the shock" stops it** (it used to start one), a missing body is
+  asked about instead of assumed, and a setpoint with the heater off now
+  turns the heater on instead of reporting success while doing nothing.
+- **Small-context safety** — chat history is trimmed to fit the model's
+  context window instead of silently truncating the system prompt.
 
-### New protections
+### Commands are verified, not assumed
 
-- **Heater watchdog** — push alert when a heater says it's heating but the
-  water isn't warming (spa 15 min / pool 45 min windows), or when it quits
-  well short of the setpoint with heat mode still on. Smart about normal
-  cycling, panel delays, and re-paging.
-- **"Reading updated Xm ago"** under every temperature — a frozen sensor is
-  visible at a glance.
+Every control command now re-reads the panel state to confirm it actually
+landed, retries once if it looks dropped, and raises an alert if the panel
+never took it. A change made by a person at the physical panel is reported,
+never fought.
 
-### Panel superpowers (Advanced menus, owner-only)
+Scheduled one-shots are crash-safe (a job can no longer be lost by a restart
+mid-run), stale jobs missed overnight don't fire at breakfast, and failures
+are surfaced instead of buried.
 
-- **Circuits** — panel names, circuit functions, egg timers, per-circuit
-  freeze protection, show-in-features.
-- **Pump** — the per-circuit speed program table.
-- **Lights** — light group rename + membership.
-- **Settings → System** — panel clock "Sync now" + valve renames.
-- **Dashboard** — skip an active heater/valve delay with one tap.
-- **Sensor calibration** — the water/air/solar temperature offsets, written
-  to the panel itself.
+### Real-deployment fixes
 
-### Fixed
+- **Login over the LAN** — the session cookie no longer demands HTTPS, so
+  signing in at `http://<pi>:3000` works.
+- **Compose that actually starts** — njsPC is built from pinned upstream
+  source (no unofficial images), the container gets serial-port permissions
+  on Raspberry Pi OS, and a Cloudflare tunnel token is optional again.
+- **Pi provisioning scripts** — `scripts/pi-setup.sh` and `pi-deploy.sh`
+  take a fresh Pi to a running install.
+- **Hardware guidance** — measured numbers for Pi-class machines are in
+  `.env.example`; short version: run the deterministic parser on the Pi
+  (`COPILOT_FORCE_MOCK=true`) or point `COPILOT_BASE_URL` at a bigger box.
 
-- **Light colors on real systems** — theme discovery used an endpoint njsPC
-  doesn't have, so real installs showed no color options at all. Now
-  discovered per light circuit (IntelliBrite fallback included).
-- **Phantom solar** — systems without solar no longer show solar heat modes.
-- **OpenAI API-key brain** — a strict-schema incompatibility that could 400
-  every request.
+### Testing
 
-### Also new
-
-- **Schedules page shows everything** — copilot one-shots (with countdowns
-  and cancel) and automations (with pause/resume) now appear alongside panel
-  schedules.
-- **Customizable quick controls** — pick which circuits live on the
-  dashboard widget (up to 8, per user).
-- **Verified by Tempest** — a badge on the weather widget whenever the
-  reading comes from your own station; hover for the last report time.
-- **Server health** — live CPU, memory, disk, Pi temperature and uptime in
-  Settings → System.
+The copilot test corpus now asserts the exact arguments that decide what
+equipment moves and when, runs every case through the real pipeline, and
+grew from 60 to 153 passing tests.
 
 ### Install / update
 
