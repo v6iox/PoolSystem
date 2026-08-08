@@ -141,6 +141,16 @@ services:
       - "443:443"
     environment:
       - MOONPOOL_DOMAIN=${MOONPOOL_DOMAIN:-}
+    # `:?` can't gate a profiled service (it would break plain `docker compose
+    # up` for everyone — see the cloudflared note), and an EMPTY domain makes
+    # Caddy misparse the site block as global options and crash-loop with an
+    # error that never mentions the real cause. So: check it ourselves, loudly.
+    command: >
+      sh -c 'if [ -z "$$MOONPOOL_DOMAIN" ]; then
+        echo "MOONPOOL_DOMAIN is not set in .env — the expose profile needs it (e.g. MOONPOOL_DOMAIN=pool.example.com). Sleeping instead of crash-looping.";
+        sleep infinity;
+      fi;
+      exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile'
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

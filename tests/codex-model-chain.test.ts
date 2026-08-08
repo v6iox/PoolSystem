@@ -103,6 +103,20 @@ describe("codex model auto-chain", () => {
     expect(requestedModels).toEqual(["gpt-5"]);
   });
 
+  it("a 400 that merely mentions 'model' does not trigger the chain", async () => {
+    requestedModels = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(init?.body ?? "{}") as { model?: string };
+        requestedModels.push(body.model ?? "");
+        return new Response(JSON.stringify({ detail: "input exceeds the model context window" }), { status: 400 });
+      })
+    );
+    await expect(parseWithCodex("hey", ctx, null)).rejects.toThrow(/context window/);
+    expect(requestedModels.length).toBe(1); // no prompt re-send to every candidate
+  });
+
   it("non-model errors (auth) do not advance the chain", async () => {
     requestedModels = [];
     vi.stubGlobal(

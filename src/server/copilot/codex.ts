@@ -26,10 +26,13 @@ const CODEX_MODEL_CANDIDATES = ["gpt-5.1-codex", "gpt-5-codex", "gpt-5.1", "gpt-
 const WORKING_MODEL_KEY = "codexWorkingModel";
 
 function isModelRejection(err: unknown): boolean {
+  // Deliberately narrow: a 400 that merely MENTIONS "model" (e.g. "input
+  // exceeds the model context window") must not send the whole prompt to
+  // every candidate. Match the actual rejection phrasings only.
   return (
     err instanceof CopilotBackendError &&
     (err.status === 400 || err.status === 404) &&
-    /model|not supported/i.test(err.message)
+    /not supported|model_not_found|unknown model|does not exist/i.test(err.message)
   );
 }
 
