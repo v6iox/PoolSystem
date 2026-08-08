@@ -41,7 +41,9 @@ export function saveProviderConfig(patch: Partial<CopilotProviderConfig>): Copil
 
 export function defaultModelFor(provider: CopilotProviderKind): string {
   if (provider === "openai-key") return "gpt-4o-mini";
-  if (provider === "chatgpt-oauth") return "gpt-5";
+  // Codex backend: leave blank to auto-pick — the accepted model set drifts,
+  // and codex.ts walks a candidate chain and remembers what works.
+  if (provider === "chatgpt-oauth") return "auto (newest Codex model)";
   return process.env.COPILOT_MODEL ?? "qwen3:1.7b";
 }
 
@@ -88,7 +90,8 @@ export async function parseWithProvider(text: string, ctx: CopilotContext): Prom
   }
 
   if (config.provider === "chatgpt-oauth" && getOauthStatus().connected) {
-    const plan = await parseWithCodex(text, ctx, model);
+    // null = auto-pick: the Codex backend's accepted model names drift.
+    const plan = await parseWithCodex(text, ctx, config.model || null);
     return ground(text, plan, ctx);
   }
 

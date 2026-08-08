@@ -1,6 +1,7 @@
 import dgram from "node:dgram";
 import { getDb, localDay, now } from "@/server/db";
 import { sendAlert } from "@/server/push";
+import { getSetting, setSetting } from "@/server/settings";
 
 /**
  * WeatherFlow Tempest integration — local-first.
@@ -41,6 +42,10 @@ interface TempestState {
   socket: dgram.Socket | null;
   restTimer: ReturnType<typeof setInterval> | null;
   udpPacketsSeen: number;
+  /** Where the freshest observation came from. */
+  source: "udp" | "rest" | null;
+  lastRestOkAt: number | null;
+  lastRestError: string | null;
 }
 
 const globalForTempest = globalThis as unknown as { __moonpoolTempest?: TempestState };
@@ -61,9 +66,47 @@ function state(): TempestState {
       socket: null,
       restTimer: null,
       udpPacketsSeen: 0,
+      source: null,
+      lastRestOkAt: null,
+      lastRestError: null,
     };
   }
   return globalForTempest.__moonpoolTempest;
+}
+
+/* ── configuration: Settings-UI values override .env, sparse like the rest ── */
+
+export interface TempestSettings {
+  /** Listen for hub broadcasts on UDP :50222. */
+  udp: boolean;
+  /** WeatherFlow personal access token (REST fallback / supplement). */
+  token: string;
+  /** Station to poll via REST. */
+  stationId: string;
+}
+
+const TEMPEST_KEY = "tempest";
+
+export function getTempestSettings(): { effective: TempestSettings; storedKeys: string[] } {
+  const stored = getSetting<Partial<TempestSettings>>(TEMPEST_KEY, {});
+  return {
+    effective: {
+      udp: stored.udp ?? process.env.TEMPEST_UDP !== "false",
+      token: stored.token ?? process.env.TEMPEST_TOKEN ?? "",
+      stationId: stored.stationId ?? process.env.TEMPEST_STATION_ID ?? "",
+    },
+    storedKeys: Object.keys(stored),
+  };
+}
+
+/** Sparse save: only explicitly-set keys are stored; null deletes a key so .env wins again. */
+export function saveTempestSettings(patch: { udp?: boolean | null; token?: string | null; stationId?: string | null }): void {
+  const stored = getSetting<Record<string, unknown>>(TEMPEST_KEY, {});
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) delete stored[key];
+    else if (value !== undefined) stored[key] = value;
+  }
+  setSetting(TEMPEST_KEY, stored);
 }
 
 function cToF(c: number): number {
@@ -133,7 +176,7 @@ function handleObsSt(obs: number[]): void {
 
 function handlePacket(raw: Buffer): void {
   const s = state();
-  let msg: { type?: string; obs?: number[][]; evt?: number[] };
+  let msg: { type?: string; obs?: number[][]; evt?: number[]; ob?: number[] };
   try {
     msg = JSON.parse(raw.toString("utf8")) as typeof msg;
   } catch {
@@ -142,10 +185,12 @@ function handlePacket(raw: Buffer): void {
   s.udpPacketsSeen += 1;
   if (msg.type === "obs_st" && Array.isArray(msg.obs) && Array.isArray(msg.obs[0])) {
     handleObsSt(msg.obs[0]);
+    s.source = "udp";
   } else if (msg.type === "evt_strike" && Array.isArray(msg.evt)) {
     onLightning(msg.evt[1] ?? 999);
-  } else if (msg.type === "rapid_wind" && Array.isArray(msg.evt) && s.current) {
-    s.current = { ...s.current, windMph: Math.round(msToMph(msg.evt[1] ?? 0) * 10) / 10 };
+  } else if (msg.type === "rapid_wind" && Array.isArray(msg.ob) && s.current) {
+    // rapid_wind carries its data in "ob" ([epoch, m/s, dir]), not "evt".
+    s.current = { ...s.current, windMph: Math.round(msToMph(msg.ob[1] ?? 0) * 10) / 10 };
   }
 }
 
@@ -153,10 +198,18 @@ async function pollRest(token: string, stationId: string): Promise<void> {
   const s = state();
   try {
     const res = await fetch(
-      `https://swd.weatherflow.com/swd/rest/observations/station/${stationId}?token=${token}`,
+      `https://swd.weatherflow.com/swd/rest/observations/station/${encodeURIComponent(stationId)}?token=${encodeURIComponent(token)}`,
       { signal: AbortSignal.timeout(8000) }
     );
-    if (!res.ok) return;
+    if (!res.ok) {
+      s.lastRestError =
+        res.status === 401 || res.status === 403
+          ? "WeatherFlow rejected the token — create one at tempestwx.com → Settings → Data Authorizations"
+          : res.status === 404
+            ? `Station ${stationId} not found on this account`
+            : `WeatherFlow API error ${res.status}`;
+      return;
+    }
     const json = (await res.json()) as {
       obs?: Array<{
         timestamp?: number;
@@ -189,13 +242,17 @@ async function pollRest(token: string, stationId: string): Promise<void> {
       rainTodayMm: s.rainTodayMm,
       lightningCount3h: o.lightning_strike_count_last_3hr ?? 0,
     };
+    s.source = "rest";
+    s.lastRestOkAt = now();
+    s.lastRestError = null;
     // Recent strike (within the poll interval) → alert.
     if (o.lightning_strike_last_epoch && o.lightning_strike_last_epoch * 1000 > now() - 6 * 60_000) {
       onLightning(o.lightning_strike_last_distance ?? 999);
     }
     sampleToHistory(s);
   } catch {
-    // offline / bad token — stay silent, UDP or Open-Meteo still cover us
+    // offline — UDP or Open-Meteo still cover us; remember why for the UI
+    s.lastRestError = "couldn't reach weatherflow.com";
   }
 }
 
@@ -203,9 +260,10 @@ export function startTempest(): void {
   const s = state();
   if (s.socket || s.restTimer) return;
   if (process.env.MOCK_MODE === "true") return;
+  const { effective } = getTempestSettings();
 
   // UDP listener (default on — harmless when no hub exists).
-  if (process.env.TEMPEST_UDP !== "false") {
+  if (effective.udp) {
     try {
       const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
       socket.on("message", handlePacket);
@@ -222,8 +280,7 @@ export function startTempest(): void {
   }
 
   // REST fallback / supplement when a token is configured.
-  const token = process.env.TEMPEST_TOKEN;
-  const stationId = process.env.TEMPEST_STATION_ID;
+  const { token, stationId } = effective;
   if (token && stationId) {
     s.restTimer = setInterval(() => {
       // Skip polling while fresh UDP data is flowing.
@@ -233,6 +290,87 @@ export function startTempest(): void {
     void pollRest(token, stationId);
     console.log(`[moonpool] Tempest REST fallback for station ${stationId}`);
   }
+}
+
+/** Tear down listeners/timers (settings changed, tests). */
+export function stopTempest(): void {
+  const s = state();
+  if (s.socket) {
+    try {
+      s.socket.close();
+    } catch {
+      /* already closed */
+    }
+    s.socket = null;
+  }
+  if (s.restTimer) {
+    clearInterval(s.restTimer);
+    s.restTimer = null;
+  }
+}
+
+/** Apply current settings live — no container restart needed. */
+export function restartTempest(): void {
+  stopTempest();
+  startTempest();
+}
+
+/** One immediate REST poll (used by the Settings "Test" flow). */
+export async function pollTempestNow(): Promise<void> {
+  const { effective } = getTempestSettings();
+  if (effective.token && effective.stationId) await pollRest(effective.token, effective.stationId);
+}
+
+export interface TempestStatus {
+  mock: boolean;
+  udpEnabled: boolean;
+  udpListening: boolean;
+  udpPacketsSeen: number;
+  restConfigured: boolean;
+  lastRestOkAt: number | null;
+  lastRestError: string | null;
+  /** Fresh data is flowing (any source). */
+  receiving: boolean;
+  source: "udp" | "rest" | null;
+  lastObsAt: number | null;
+  current: TempestCurrent | null;
+}
+
+export function getTempestStatus(): TempestStatus {
+  const s = state();
+  const { effective } = getTempestSettings();
+  const current = getTempestCurrent();
+  return {
+    mock: process.env.MOCK_MODE === "true",
+    udpEnabled: effective.udp,
+    udpListening: s.socket !== null,
+    udpPacketsSeen: s.udpPacketsSeen,
+    restConfigured: Boolean(effective.token && effective.stationId),
+    lastRestOkAt: s.lastRestOkAt,
+    lastRestError: s.lastRestError,
+    receiving: current !== null,
+    source: process.env.MOCK_MODE === "true" ? "udp" : current ? s.source : null,
+    lastObsAt: current?.at ?? null,
+    current,
+  };
+}
+
+/** Stations visible to a WeatherFlow token — the Settings station picker. */
+export async function listTempestStations(token: string): Promise<Array<{ id: number; name: string }>> {
+  const res = await fetch(`https://swd.weatherflow.com/swd/rest/stations?token=${encodeURIComponent(token)}`, {
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) {
+    throw new Error(
+      res.status === 401 || res.status === 403
+        ? "WeatherFlow rejected the token — create one at tempestwx.com → Settings → Data Authorizations"
+        : `WeatherFlow API error ${res.status}`
+    );
+  }
+  const json = (await res.json()) as { stations?: Array<{ station_id?: number; name?: string; public_name?: string }> };
+  return (json.stations ?? [])
+    .map((st) => ({ id: st.station_id ?? 0, name: st.public_name || st.name || `Station ${st.station_id}` }))
+    .filter((st) => st.id > 0);
 }
 
 /** Fresh station conditions, or null if we haven't heard from the Tempest lately. */

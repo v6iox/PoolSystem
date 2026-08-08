@@ -1,0 +1,7 @@
+# Moonpool HTTPS front door for the docker-compose "expose" profile.
+# MOONPOOL_DOMAIN comes from .env; Caddy obtains and renews the Let's Encrypt
+# certificate automatically (ports 80 + 443 must be forwarded to the Pi).
+{$MOONPOOL_DOMAIN} {
+	encode gzip
+	reverse_proxy web:3000
+}

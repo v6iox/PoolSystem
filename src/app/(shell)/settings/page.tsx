@@ -11,6 +11,7 @@ import { AppearanceSection } from "@/components/settings/appearance-section";
 import { UnitsSection } from "@/components/settings/units-section";
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { CalibrationSection } from "@/components/settings/calibration-section";
+import { TempestSection } from "@/components/settings/tempest-section";
 import { SettingsLinkCard } from "@/components/settings/section";
 
 export default function SettingsPage(): React.JSX.Element {
@@ -86,6 +87,12 @@ export default function SettingsPage(): React.JSX.Element {
         {isOwner && (
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
             <CalibrationSection />
+          </motion.div>
+        )}
+
+        {isOwner && (
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}>
+            <TempestSection />
           </motion.div>
         )}
 

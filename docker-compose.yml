@@ -125,8 +125,33 @@ services:
     depends_on:
       - web
 
+  # Optional: direct port-forward remote access with automatic HTTPS — no VPN,
+  # no tunnel account. Point a domain (or DDNS name) at your home IP, forward
+  # ports 80 + 443 on the router to the Pi, set MOONPOOL_DOMAIN in .env, then:
+  #   docker compose --profile expose up -d
+  # Caddy fetches and renews the Let's Encrypt certificate itself, and its
+  # X-Forwarded-Proto header makes Moonpool issue Secure cookies. Never forward
+  # port 3000 directly — that would send passwords over the internet in clear.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["expose"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - MOONPOOL_DOMAIN=${MOONPOOL_DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+
 volumes:
   moonpool-data:
   njspc-data:
   njspc-config:
   ollama-models:
+  caddy-data:
+  caddy-config:
