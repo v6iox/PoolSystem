@@ -1,20 +1,35 @@
-## Moonpool v1.0.11 🌙
+## Moonpool v1.0.12 🌙
 
-One fix, but an important one if you use sensor calibration. If you're on
-v1.0.10 with auto-update enabled, this installs itself.
+Copilot un-broken for ChatGPT sign-in, Tempest setup that lives in the app,
+and a new no-VPN remote-access option. If you're on v1.0.11 with auto-update
+enabled, this installs itself.
 
 ### Fixed
 
-- **"Heat to 100" now means a true 100 with calibration set** — the panel's
-  thermostat runs on its own uncorrected sensor, so a Moonpool offset used
-  to fix what you *saw* but not where heating *stopped*: with a −4 offset
-  (sensor reads 4° high), asking for 100 heated the water to a true 96.
-  Setpoints are now compensated end-to-end — asking for 100 tells the panel
-  104, so its high-reading sensor says 104 exactly when the water is truly
-  100, and everything Moonpool displays agrees with what you asked for.
-- **Scald limit stays the panel's** — a positive offset never unlocks true
-  temperatures above the panel's own ceiling (104°F spa): the compensated
-  range is capped so miscalibration can't be used to overshoot it.
+- **Copilot with "Sign in with ChatGPT" works again** — OpenAI's backend
+  started rejecting the model Moonpool requested ("The 'gpt-5' model is not
+  supported…"), which failed every message. Moonpool now auto-discovers a
+  model the backend accepts, remembers it, and re-heals when OpenAI retires
+  model names in the future. A manually-set model in Settings is always used
+  as-is.
+- **Tempest live wind never updated** — the rapid-wind packets were read
+  from the wrong field; real-time wind now flows between full observations.
+
+### Added
+
+- **Tempest setup in the app** — Settings → Tempest weather station: live
+  status (receiving or not, LAN broadcast vs cloud, data freshness, and the
+  reason the last cloud poll failed), a UDP toggle, WeatherFlow token entry
+  with a station picker that finds your station for you, and a test button.
+  Changes apply instantly — no restart, no .env editing (though .env still
+  works and the UI shows which source is active). The token never leaves
+  the Pi.
+- **Direct port-forward remote access** — a new `expose` Docker profile puts
+  a Caddy proxy with automatic Let's Encrypt HTTPS in front of Moonpool:
+  point a domain at your home IP, forward ports 80 + 443, set
+  `MOONPOOL_DOMAIN`, and use the app from anywhere with no VPN and no
+  tunnel. The setup guide compares all three remote-access options — and
+  explains why you should never forward plain-HTTP port 3000.
 
 ### Install / update
 
