@@ -46,7 +46,7 @@ export function SettingRow({
 }: {
   icon?: React.ReactNode;
   label: string;
-  hint?: string;
+  hint?: React.ReactNode;
   children?: React.ReactNode;
   /** Control renders under the label instead of beside it (for wide controls). */
   stacked?: boolean;

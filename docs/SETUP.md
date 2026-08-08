@@ -217,8 +217,8 @@ push notifications to work away from home you'll want HTTPS — next section.
 
 ## 9. Remote access — no VPN app needed
 
-Two good options; both end with a real HTTPS URL your phone can use anywhere,
-with no VPN client installed.
+Three good options; each ends with a real HTTPS URL your phone can use
+anywhere, with no VPN client installed.
 
 ### Option A: Cloudflare Tunnel (recommended, needs a domain on Cloudflare)
 
@@ -245,6 +245,25 @@ You get `https://moonpool.<your-tailnet>.ts.net`, publicly reachable — and
 only the **Pi** runs Tailscale; phones need nothing installed. (If you'd
 rather keep it private to your own devices, use `tailscale serve` instead and
 install the Tailscale app on your phone — that's the one VPN-ish variant.)
+
+### Option C: Direct port-forward (no third party in the path)
+
+If you'd rather forward ports on your own router than run anything through
+Cloudflare or Tailscale:
+
+1. Point a domain (or a free DDNS name — DuckDNS etc.) at your home IP.
+2. On the router, forward **80 and 443** to the Pi.
+3. In `.env`: `MOONPOOL_DOMAIN=pool.yourdomain.com`, then
+   `docker compose --profile expose up -d`.
+4. Open `https://pool.yourdomain.com` → Add to Home Screen.
+
+The bundled Caddy proxy fetches and renews the Let's Encrypt certificate
+automatically and terminates HTTPS in front of Moonpool, so sessions get
+Secure cookies. **Never forward port 3000 itself** — that's plain HTTP, which
+would send your password across the internet in clear text. Going this route
+exposes your home IP and login page to the internet, so: long password, leave
+auto-update on, and glance at the audit log now and then. Moonpool rate-limits
+login attempts on every path.
 
 ## 10. Push notifications
 

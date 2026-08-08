@@ -64,9 +64,12 @@ export function fitHistory(
 }
 
 export class CopilotBackendError extends Error {
-  constructor(message: string) {
+  /** HTTP status from the backend, when the failure was an HTTP error. */
+  status?: number;
+  constructor(message: string, status?: number) {
     super(message);
     this.name = "CopilotBackendError";
+    this.status = status;
   }
 }
 

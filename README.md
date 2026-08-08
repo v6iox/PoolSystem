@@ -106,6 +106,25 @@ docker compose up -d --build
 docker compose exec ollama ollama pull qwen3:1.7b
 ```
 
+### Remote access from anywhere
+
+Three ways to open the app away from home, all "tap the icon and it loads" —
+pick by taste:
+
+| Option | Open router ports | Needs | Best for |
+|---|---|---|---|
+| **Cloudflare Tunnel** (`--profile remote`) | none | free CF account + domain | easiest safe default — home IP stays hidden |
+| **Direct port-forward** (`--profile expose`) | 80 + 443 | a domain/DDNS name pointed at home | no third party in the path; Caddy auto-provisions HTTPS |
+| **Tailscale VPN-on-demand** | none | Tailscale on Pi + phone | most private — nothing is reachable from the internet at all |
+
+For the port-forward option: set `MOONPOOL_DOMAIN` in `.env`, forward ports
+80 + 443 to the Pi, and `docker compose --profile expose up -d`. Caddy
+fetches and renews the Let's Encrypt certificate itself. **Never forward port
+3000 directly** — that's plain HTTP, which sends your password across the
+internet in clear text. Whatever you expose: use a long password, leave
+auto-update on, and know that login is rate-limited and every action is in
+the audit log.
+
 ## Architecture
 
 ```
