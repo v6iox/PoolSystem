@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, Check, ExternalLink, KeyRound, Loader2, LogOut, Sparkles, Waves } from "lucide-react";
+import { Brain, Check, ExternalLink, Globe, KeyRound, Loader2, LogOut, Sparkles, Waves } from "lucide-react";
 import { apiGet, apiSend } from "@/lib/client/api";
 import { toast } from "@/stores/toast";
 import { Button } from "@/components/ui/button";
@@ -17,10 +17,11 @@ import { cn } from "@/lib/utils";
  */
 
 interface ProviderInfo {
-  provider: "env" | "openai-key" | "chatgpt-oauth";
+  provider: "env" | "openai-key" | "openrouter" | "chatgpt-oauth";
   model: string;
   defaultModel: string;
   hasApiKey: boolean;
+  hasOpenrouterKey: boolean;
   oauth: { connected: boolean; email: string; plan: string };
   envBackend: string;
 }
@@ -28,12 +29,14 @@ interface ProviderInfo {
 const OPTIONS: Array<{ id: ProviderInfo["provider"]; title: string; detail: string; icon: React.ReactNode }> = [
   { id: "env", title: "Local (Ollama)", detail: "Runs on the Pi — private, no account", icon: <Waves size={16} /> },
   { id: "openai-key", title: "OpenAI API key", detail: "Official API, pay-per-use", icon: <KeyRound size={16} /> },
+  { id: "openrouter", title: "OpenRouter", detail: "One key, any model — Claude, Gemini, Llama…", icon: <Globe size={16} /> },
   { id: "chatgpt-oauth", title: "Sign in with ChatGPT", detail: "Uses your Plus/Pro subscription", icon: <Sparkles size={16} /> },
 ];
 
 export function CopilotBrainSection(): React.JSX.Element {
   const queryClient = useQueryClient();
   const [apiKey, setApiKey] = useState("");
+  const [orKey, setOrKey] = useState("");
   const [model, setModel] = useState<string | null>(null);
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [pasted, setPasted] = useState("");
@@ -116,11 +119,12 @@ export function CopilotBrainSection(): React.JSX.Element {
           role-checked, confirmed, and audited — the model only ever parses intent.
         </p>
 
-        <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {OPTIONS.map((opt) => {
             const active = info?.provider === opt.id;
             const disabled =
               (opt.id === "openai-key" && !info?.hasApiKey && !apiKey) ||
+              (opt.id === "openrouter" && !info?.hasOpenrouterKey && !orKey) ||
               (opt.id === "chatgpt-oauth" && !info?.oauth.connected);
             return (
               <button
@@ -165,6 +169,37 @@ export function CopilotBrainSection(): React.JSX.Element {
                 disabled={busy || !apiKey.trim()}
                 onClick={() => {
                   void save({ apiKey: apiKey.trim(), provider: "openai-key" }).then(() => setApiKey(""));
+                }}
+              >
+                Save & use
+              </Button>
+            </div>
+          </Field>
+        </div>
+
+        {/* OpenRouter API key */}
+        <div className="mb-4">
+          <Field
+            label="OpenRouter API key"
+            hint={
+              info?.hasOpenrouterKey
+                ? "A key is saved (stored only in the Pi's local database). Paste a new one to replace it."
+                : "sk-or-… from openrouter.ai/keys — one key unlocks Claude, Gemini, Llama, DeepSeek and hundreds more. Set the model below like anthropic/claude-sonnet-4."
+            }
+          >
+            <div className="flex gap-2">
+              <Input
+                type="password"
+                placeholder={info?.hasOpenrouterKey ? "••••••••••••" : "sk-or-…"}
+                value={orKey}
+                onChange={(e) => setOrKey(e.target.value)}
+                autoComplete="new-password"
+              />
+              <Button
+                variant="primary"
+                disabled={busy || !orKey.trim()}
+                onClick={() => {
+                  void save({ openrouterApiKey: orKey.trim(), provider: "openrouter" }).then(() => setOrKey(""));
                 }}
               >
                 Save & use
