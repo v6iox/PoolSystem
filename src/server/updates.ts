@@ -121,6 +121,9 @@ export function installKind(): "docker" | "source" {
   return UPDATER_URL ? "docker" : "source";
 }
 
+/** The sidecar generation this build of the web app expects (see updater.mjs). */
+export const EXPECTED_UPDATER_GENERATION = 2;
+
 export interface UpdaterStatus {
   reachable: boolean;
   busy: boolean;
@@ -128,10 +131,14 @@ export interface UpdaterStatus {
   phase: string;
   /** 0–100 estimate for the progress bar. */
   progress: number;
+  /** Sidecar capability generation; 0 = an old image that predates the field. */
+  generation: number;
+  /** True when the running sidecar image is older than this web build expects. */
+  stale: boolean;
   log: string[];
 }
 
-const OFFLINE: UpdaterStatus = { reachable: false, busy: false, phase: "idle", progress: 0, log: [] };
+const OFFLINE: UpdaterStatus = { reachable: false, busy: false, phase: "idle", progress: 0, generation: 0, stale: false, log: [] };
 
 export async function getUpdaterStatus(): Promise<UpdaterStatus> {
   if (!UPDATER_URL) return OFFLINE;
@@ -141,12 +148,15 @@ export async function getUpdaterStatus(): Promise<UpdaterStatus> {
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return OFFLINE;
-    const json = (await res.json()) as { busy?: boolean; phase?: string; progress?: number; log?: string[] };
+    const json = (await res.json()) as { busy?: boolean; phase?: string; progress?: number; generation?: number; log?: string[] };
+    const generation = typeof json.generation === "number" ? json.generation : 0;
     return {
       reachable: true,
       busy: json.busy === true,
       phase: typeof json.phase === "string" ? json.phase : "idle",
       progress: typeof json.progress === "number" ? Math.max(0, Math.min(100, json.progress)) : 0,
+      generation,
+      stale: generation < EXPECTED_UPDATER_GENERATION,
       log: json.log ?? [],
     };
   } catch {
