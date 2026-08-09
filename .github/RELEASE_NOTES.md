@@ -1,35 +1,37 @@
-## Moonpool v1.0.12 🌙
+## Moonpool v1.0.13 🌙
 
-Copilot un-broken for ChatGPT sign-in, Tempest setup that lives in the app,
-and a new no-VPN remote-access option. If you're on v1.0.11 with auto-update
-enabled, this installs itself.
+Copilot fixed for OpenAI's model retirements, a new OpenRouter brain, and a
+round of review hardening for v1.0.12's features. If you're on v1.0.12 with
+auto-update enabled, this installs itself.
 
 ### Fixed
 
-- **Copilot with "Sign in with ChatGPT" works again** — OpenAI's backend
-  started rejecting the model Moonpool requested ("The 'gpt-5' model is not
-  supported…"), which failed every message. Moonpool now auto-discovers a
-  model the backend accepts, remembers it, and re-heals when OpenAI retires
-  model names in the future. A manually-set model in Settings is always used
-  as-is.
-- **Tempest live wind never updated** — the rapid-wind packets were read
-  from the wrong field; real-time wind now flows between full observations.
+- **ChatGPT sign-in copilot works with OpenAI's current models** — OpenAI
+  retired the entire model lineup Moonpool knew, so every request failed.
+  The auto-picker now leads with the current GPT-5.6 family (terra/sol/luna)
+  and, as before, remembers what works and re-heals on the next retirement.
+- **Tempest: replacing a saved token actually saves** — on accounts with
+  several stations, "Find my station" now stores the pasted token the moment
+  WeatherFlow validates it (the station picker used to be the only save
+  path, and re-picking your current station saved nothing).
+- **Tempest cloud polling no longer slows down after the hub goes quiet** —
+  a stale "UDP is flowing" heuristic halved the poll rate and made the
+  status card flap between receiving/not receiving.
+- **`expose` profile: a missing MOONPOOL_DOMAIN now says so** instead of
+  crash-looping Caddy with an unrelated parse error.
+- Smaller ones: stale WeatherFlow errors no longer outlive a removed token;
+  a station with no recent observations now reads "is the hub online?";
+  settings saves can't be overwritten by a background refresh; the token
+  field refuses password-manager autofill; an oversized copilot prompt no
+  longer retries across every model.
 
 ### Added
 
-- **Tempest setup in the app** — Settings → Tempest weather station: live
-  status (receiving or not, LAN broadcast vs cloud, data freshness, and the
-  reason the last cloud poll failed), a UDP toggle, WeatherFlow token entry
-  with a station picker that finds your station for you, and a test button.
-  Changes apply instantly — no restart, no .env editing (though .env still
-  works and the UI shows which source is active). The token never leaves
-  the Pi.
-- **Direct port-forward remote access** — a new `expose` Docker profile puts
-  a Caddy proxy with automatic Let's Encrypt HTTPS in front of Moonpool:
-  point a domain at your home IP, forward ports 80 + 443, set
-  `MOONPOOL_DOMAIN`, and use the app from anywhere with no VPN and no
-  tunnel. The setup guide compares all three remote-access options — and
-  explains why you should never forward plain-HTTP port 3000.
+- **OpenRouter as a copilot brain** — one `sk-or-` key from openrouter.ai
+  unlocks Claude, Gemini, Llama, DeepSeek and hundreds more. Pick it in
+  Settings → Voice & AI, set any OpenRouter model slug (default
+  `openai/gpt-4o-mini`). Key stored only on the Pi; same grounding,
+  validation and confirmation pipeline as every other brain.
 
 ### Install / update
 
