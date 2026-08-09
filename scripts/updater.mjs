@@ -22,6 +22,11 @@ import { hostname } from "node:os";
 const PORT = 9888;
 const TOKEN = process.env.UPDATER_TOKEN ?? "";
 const WORKSPACE = "/workspace";
+// Capability generation reported in /status. The web UI compares against the
+// generation it ships with, so a sidecar still running an older baked image
+// (one-tap updates only rebuild `web`) is DETECTED and the owner is told the
+// one-time refresh command instead of silently getting a frozen progress bar.
+const GENERATION = 2;
 
 let busy = false;
 let currentRef = "";
@@ -226,7 +231,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "GET" && req.url === "/status") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ busy, ref: currentRef, phase, progress, log: log.slice(-60) }));
+    res.end(JSON.stringify({ busy, ref: currentRef, phase, progress, generation: GENERATION, log: log.slice(-60) }));
     return;
   }
   if (req.method === "POST" && req.url === "/update") {

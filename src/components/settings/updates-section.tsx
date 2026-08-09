@@ -27,9 +27,11 @@ interface UpdatesInfo {
     lastError: string | null;
   };
   config: { auto: boolean; hour: number };
-  updater: { reachable: boolean; busy: boolean; phase: string; progress: number; log: string[] };
+  updater: { reachable: boolean; busy: boolean; phase: string; progress: number; stale: boolean; log: string[] };
   installKind: "docker" | "source";
 }
+
+const REFRESH_CMD = "cd ~/moonpool && docker compose build updater && docker compose up -d updater";
 
 const PHASE_LABELS: Record<string, string> = {
   fetch: "Fetching the release…",
@@ -227,6 +229,36 @@ export function UpdatesSection(): React.JSX.Element {
                 {line}
               </p>
             ))}
+          </div>
+        )}
+
+        {info?.updater.reachable && info.updater.stale && (
+          <div className="mt-3 rounded-xl border border-warn/30 bg-warn/10 p-3">
+            <p className="text-xs font-medium text-warn">
+              One-time step needed: the updater helper on this Pi is an older version
+            </p>
+            <p className="mt-1.5 text-xs text-ink-faint">
+              Updates still work, but the live progress bar (and the helper keeping itself current) need the newer
+              helper — and the helper can&apos;t rebuild itself from the old version. Run this once over SSH; after
+              that it stays up to date automatically:
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <code className="flex-1 overflow-x-auto rounded-lg bg-abyss/60 px-2.5 py-1.5 font-mono text-[11px] text-ink-dim">
+                {REFRESH_CMD}
+              </code>
+              <Button
+                variant="glass"
+                size="sm"
+                onClick={() => {
+                  void navigator.clipboard.writeText(REFRESH_CMD).then(
+                    () => toast("success", "Command copied"),
+                    () => toast("error", "Couldn't copy — select the text manually")
+                  );
+                }}
+              >
+                Copy
+              </Button>
+            </div>
           </div>
         )}
 
