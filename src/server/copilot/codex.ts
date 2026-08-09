@@ -21,15 +21,22 @@ const TIMEOUT_MS = 30_000;
  * supported when using Codex with a ChatGPT account"). Auto mode walks this
  * chain on that error and remembers what worked, so discovery costs one extra
  * round-trip once; an explicit Settings model override is used verbatim.
+ *
+ * Current family (Aug 2026): gpt-5.6 sol/terra/luna, with terra as the
+ * everyday default; gpt-5.4 + gpt-5.4-mini retire 2026-08-31. Older Codex
+ * slugs at the tail as a hedge for installs whose backend lags.
  */
-const CODEX_MODEL_CANDIDATES = ["gpt-5.1-codex", "gpt-5-codex", "gpt-5.1", "gpt-5-codex-mini", "codex-mini-latest"];
+const CODEX_MODEL_CANDIDATES = ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.4", "gpt-5.4-mini", "gpt-5.2-codex"];
 const WORKING_MODEL_KEY = "codexWorkingModel";
 
 function isModelRejection(err: unknown): boolean {
+  // Deliberately narrow: a 400 that merely MENTIONS "model" (e.g. "input
+  // exceeds the model context window") must not send the whole prompt to
+  // every candidate. Match the actual rejection phrasings only.
   return (
     err instanceof CopilotBackendError &&
     (err.status === 400 || err.status === 404) &&
-    /model|not supported/i.test(err.message)
+    /not supported|model_not_found|unknown model|does not exist/i.test(err.message)
   );
 }
 

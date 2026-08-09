@@ -227,7 +227,12 @@ async function pollRest(token: string, stationId: string): Promise<void> {
       }>;
     };
     const o = json.obs?.[0];
-    if (!o) return;
+    if (!o) {
+      // 200 with no observations = token+station fine, hub silent. Say so —
+      // otherwise the UI reads "no error, not receiving" as "not configured".
+      s.lastRestError = "WeatherFlow knows the station but it has no recent observations — is the hub online?";
+      return;
+    }
     rollRainDay(s);
     s.rainTodayMm = o.precip_accum_local_day ?? s.rainTodayMm;
     s.current = {
@@ -283,12 +288,19 @@ export function startTempest(): void {
   const { token, stationId } = effective;
   if (token && stationId) {
     s.restTimer = setInterval(() => {
-      // Skip polling while fresh UDP data is flowing.
-      if (s.current && now() - s.current.at < FRESH_MS && s.udpPacketsSeen > 0) return;
+      // Skip polling only while UDP is the live source with fresh data — a
+      // lifetime packet count is NOT "currently flowing": after the hub goes
+      // quiet (or UDP is switched off) REST must poll every tick, or the
+      // cadence silently halves and freshness flaps.
+      if (s.source === "udp" && s.current && now() - s.current.at < FRESH_MS) return;
       void pollRest(token, stationId);
     }, 5 * 60_000);
     void pollRest(token, stationId);
     console.log(`[moonpool] Tempest REST fallback for station ${stationId}`);
+  } else {
+    // REST no longer configured — an old failure reason must not outlive it.
+    s.lastRestError = null;
+    s.lastRestOkAt = null;
   }
 }
 
@@ -307,6 +319,9 @@ export function stopTempest(): void {
     clearInterval(s.restTimer);
     s.restTimer = null;
   }
+  // The counter reads as "packets since the listener started" in the UI —
+  // and must never masquerade as "UDP currently flowing" after a stop.
+  s.udpPacketsSeen = 0;
 }
 
 /** Apply current settings live — no container restart needed. */

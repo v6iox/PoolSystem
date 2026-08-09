@@ -52,6 +52,10 @@ export function TempestSection(): React.JSX.Element {
   const save = async (patch: Record<string, unknown>, okMsg: string): Promise<void> => {
     setBusy(true);
     try {
+      // The PUT is slow (it restarts the listener and polls WeatherFlow) —
+      // stop the 30s background refetch from racing it and re-imposing a
+      // pre-save snapshot over the fresh response.
+      await queryClient.cancelQueries({ queryKey: ["tempest"] });
       const res = await apiSend<TempestInfo>("PUT", "/api/settings/tempest", patch);
       queryClient.setQueryData(["tempest"], res);
       toast("success", okMsg);
@@ -66,20 +70,29 @@ export function TempestSection(): React.JSX.Element {
     setBusy(true);
     setStations(null);
     try {
+      const pasted = token.trim();
       const res = await apiSend<{ stations: Array<{ id: number; name: string }> }>(
         "POST",
         "/api/settings/tempest/stations",
-        token.trim() ? { token: token.trim() } : {}
+        pasted ? { token: pasted } : {}
       );
       if (res.stations.length === 0) {
         toast("info", "No stations on that account", "The token works, but WeatherFlow lists no stations for it.");
       }
       setStations(res.stations);
-      // Auto-pick when there's exactly one — the common case.
       if (res.stations.length === 1 && res.stations[0]) {
-        const patch: Record<string, unknown> = { stationId: String(res.stations[0].id) };
-        if (token.trim()) patch.token = token.trim();
-        await save(patch, `Station "${res.stations[0].name}" connected`);
+        // Exactly one station — connect it (and the token) in one step.
+        await save(
+          { stationId: String(res.stations[0].id), ...(pasted ? { token: pasted } : {}) },
+          `Station "${res.stations[0].name}" connected`
+        );
+        setToken("");
+      } else if (pasted && res.stations.length > 0) {
+        // Multi-station account: the listing just VALIDATED the pasted token,
+        // so persist it now — the picker must not be the only save path (a
+        // controlled Select never fires when re-picking the current station,
+        // which would make replacing an expired token impossible).
+        await save({ token: pasted }, "Token saved — now pick the station");
         setToken("");
       }
     } catch (err) {
@@ -174,6 +187,11 @@ export function TempestSection(): React.JSX.Element {
                 placeholder={info.settings.tokenSet ? "••••••••" : "paste token"}
                 className="w-40"
                 aria-label="WeatherFlow token"
+                // Not a login field: stop password managers from autofilling
+                // the Moonpool password here (it would be sent to WeatherFlow)
+                // or offering to save the token as the site password.
+                autoComplete="new-password"
+                name="weatherflow-token"
               />
               <Button size="sm" variant="glass" disabled={busy || (!token.trim() && !info.settings.tokenSet)} onClick={() => void findStations()}>
                 {busy ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Find my station
@@ -185,11 +203,7 @@ export function TempestSection(): React.JSX.Element {
             <SettingRow label="Station" hint="This account has several stations — pick the one at the pool">
               <Select
                 value={info.settings.stationId}
-                onValueChange={(id) => {
-                  const patch: Record<string, unknown> = { stationId: id };
-                  if (token.trim()) patch.token = token.trim();
-                  void save(patch, "Station connected").then(() => setToken(""));
-                }}
+                onValueChange={(id) => void save({ stationId: id }, "Station connected")}
                 options={stations.map((st) => ({ value: String(st.id), label: `${st.name} (#${st.id})` }))}
                 aria-label="Tempest station"
                 className="w-52"

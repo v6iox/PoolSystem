@@ -7,17 +7,19 @@ import { groundPlan } from "./grounding";
 import type { CopilotContext } from "./tools";
 
 /**
- * Copilot brain selection. Three ways to run it, switchable in Settings:
+ * Copilot brain selection. Four ways to run it, switchable in Settings:
  *  - "env"           local Ollama (or whatever COPILOT_BASE_URL points at);
  *                    in MOCK_MODE this uses the deterministic parser
  *  - "openai-key"    official OpenAI API with a pasted key (stored only in
  *                    the local SQLite on the Pi)
+ *  - "openrouter"    OpenRouter with a pasted key — one account, any model
+ *                    (Claude, Gemini, Llama, DeepSeek, …), OpenAI-compatible
  *  - "chatgpt-oauth" Sign in with ChatGPT (Codex/OpenClaw-style PKCE flow) —
  *                    uses the ChatGPT subscription instead of API billing.
  *                    Unofficial: may break if OpenAI changes their backend.
  */
 
-export type CopilotProviderKind = "env" | "openai-key" | "chatgpt-oauth";
+export type CopilotProviderKind = "env" | "openai-key" | "openrouter" | "chatgpt-oauth";
 
 export interface CopilotProviderConfig {
   provider: CopilotProviderKind;
@@ -25,9 +27,11 @@ export interface CopilotProviderConfig {
   model: string;
   /** Only for openai-key. */
   apiKey: string;
+  /** Only for openrouter (separate so switching providers never mixes keys). */
+  openrouterApiKey: string;
 }
 
-const DEFAULTS: CopilotProviderConfig = { provider: "env", model: "", apiKey: "" };
+const DEFAULTS: CopilotProviderConfig = { provider: "env", model: "", apiKey: "", openrouterApiKey: "" };
 
 export function getProviderConfig(): CopilotProviderConfig {
   return { ...DEFAULTS, ...getSetting<Partial<CopilotProviderConfig>>("copilotProvider", {}) };
@@ -41,6 +45,8 @@ export function saveProviderConfig(patch: Partial<CopilotProviderConfig>): Copil
 
 export function defaultModelFor(provider: CopilotProviderKind): string {
   if (provider === "openai-key") return "gpt-4o-mini";
+  // Cheap, reliable at strict JSON, always available on OpenRouter.
+  if (provider === "openrouter") return "openai/gpt-4o-mini";
   // Codex backend: leave blank to auto-pick — the accepted model set drifts,
   // and codex.ts walks a candidate chain and remembers what works.
   if (provider === "chatgpt-oauth") return "auto (newest Codex model)";
@@ -85,6 +91,17 @@ export async function parseWithProvider(text: string, ctx: CopilotContext): Prom
       apiKey: config.apiKey,
       model,
       timeoutMs: 20_000,
+    });
+    return ground(text, plan, ctx);
+  }
+
+  if (config.provider === "openrouter" && config.openrouterApiKey) {
+    // OpenRouter speaks the OpenAI chat-completions dialect verbatim.
+    const plan: LlmPlan = await parseWithLlm(text, ctx, {
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiKey: config.openrouterApiKey,
+      model,
+      timeoutMs: 30_000,
     });
     return ground(text, plan, ctx);
   }

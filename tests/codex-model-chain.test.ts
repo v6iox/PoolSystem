@@ -66,33 +66,33 @@ afterAll(() => {
 
 describe("codex model auto-chain", () => {
   it("walks past rejected models, succeeds, and remembers the survivor", async () => {
-    accepted = new Set(["gpt-5-codex"]);
+    accepted = new Set(["gpt-5.6-sol"]);
     requestedModels = [];
     stubFetch();
     const plan = await parseWithCodex("what's the salt level?", ctx, null);
     expect(plan.reply).toBe("Salt is 3100 ppm.");
     // First candidate rejected, second accepted — and persisted for next time.
-    expect(requestedModels).toEqual(["gpt-5.1-codex", "gpt-5-codex"]);
-    expect(getSetting("codexWorkingModel", "")).toBe("gpt-5-codex");
+    expect(requestedModels).toEqual(["gpt-5.6-terra", "gpt-5.6-sol"]);
+    expect(getSetting("codexWorkingModel", "")).toBe("gpt-5.6-sol");
   });
 
   it("uses the remembered model first on later calls", async () => {
-    accepted = new Set(["gpt-5-codex"]);
-    setSetting("codexWorkingModel", "gpt-5-codex");
+    accepted = new Set(["gpt-5.6-sol"]);
+    setSetting("codexWorkingModel", "gpt-5.6-sol");
     requestedModels = [];
     stubFetch();
     await parseWithCodex("hey", ctx, null);
-    expect(requestedModels).toEqual(["gpt-5-codex"]);
+    expect(requestedModels).toEqual(["gpt-5.6-sol"]);
   });
 
   it("re-heals when the remembered model is retired", async () => {
-    accepted = new Set(["gpt-5.1"]);
-    setSetting("codexWorkingModel", "gpt-5-codex"); // no longer accepted
+    accepted = new Set(["gpt-5.6-luna"]);
+    setSetting("codexWorkingModel", "gpt-5.6-terra"); // no longer accepted
     requestedModels = [];
     stubFetch();
     await parseWithCodex("hey", ctx, null);
-    expect(requestedModels).toEqual(["gpt-5-codex", "gpt-5.1-codex", "gpt-5.1"]);
-    expect(getSetting("codexWorkingModel", "")).toBe("gpt-5.1");
+    expect(requestedModels).toEqual(["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"]);
+    expect(getSetting("codexWorkingModel", "")).toBe("gpt-5.6-luna");
   });
 
   it("an explicit override is used verbatim and never chained", async () => {
@@ -101,6 +101,20 @@ describe("codex model auto-chain", () => {
     stubFetch();
     await expect(parseWithCodex("hey", ctx, "gpt-5")).rejects.toThrow(/Clear the model override/);
     expect(requestedModels).toEqual(["gpt-5"]);
+  });
+
+  it("a 400 that merely mentions 'model' does not trigger the chain", async () => {
+    requestedModels = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: { body?: string }) => {
+        const body = JSON.parse(init?.body ?? "{}") as { model?: string };
+        requestedModels.push(body.model ?? "");
+        return new Response(JSON.stringify({ detail: "input exceeds the model context window" }), { status: 400 });
+      })
+    );
+    await expect(parseWithCodex("hey", ctx, null)).rejects.toThrow(/context window/);
+    expect(requestedModels.length).toBe(1); // no prompt re-send to every candidate
   });
 
   it("non-model errors (auth) do not advance the chain", async () => {
